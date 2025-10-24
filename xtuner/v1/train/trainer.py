@@ -150,7 +150,7 @@ class TrainerConfig(BaseModel):
     skip_checkpoint_validation: bool = False  # Suggest enabled if fsdp_size is larger than 512
     hf_interval: int | None = None
     hf_max_keep: int | None = None
-    exp_tracker: Literal["tensorboard", "jsonl"] = "jsonl"
+    exp_tracker: Literal["tensorboard", "jsonl"] | None = "jsonl"
     profile_step: list[int] | int | None = None
     profile_time: bool = True
     profile_memory: bool = False
@@ -246,7 +246,7 @@ class Trainer:
         skip_checkpoint_validation: bool = False,  # Suggest enabled if fsdp_size is larger than 512
         hf_interval: int | None = None,
         hf_max_keep: int | None = None,
-        exp_tracker: Literal["tensorboard", "jsonl"] = "jsonl",
+        exp_tracker: Literal["tensorboard", "jsonl"] | None = "jsonl",
         profile_step: list[int] | int | None = None,
         profile_time: bool = True,
         profile_memory: bool = False,
@@ -600,7 +600,9 @@ class Trainer:
         logger.add(sys.stderr, format=log_format(rank=get_rank()))
         return logger, log_dir
 
-    def _init_tracker(self, exp_tracker: Literal["tensorboard", "jsonl"], log_dir: Path):
+    def _init_tracker(self, exp_tracker: Literal["tensorboard", "jsonl"] | None, log_dir: Path):
+        if exp_tracker is None:
+            return None
         writer = get_writer(writer_type=exp_tracker, log_dir=log_dir)
         return writer
 
@@ -1042,7 +1044,8 @@ class Trainer:
             "grad_norm": round(grad_norm, 3),
         }
         log_scalars.update({f"loss/{k}": v for k, v in loss_log.items()})
-        self._exp_tracker.add_scalars(tag_scalar_dict=log_scalars, global_step=self.cur_step)
+        if self._exp_tracker is not None:
+            self._exp_tracker.add_scalars(tag_scalar_dict=log_scalars, global_step=self.cur_step)
 
         DEVICE_MODULE.reset_peak_memory_stats()  # type: ignore[attr-defined]
 
