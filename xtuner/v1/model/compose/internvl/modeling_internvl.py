@@ -1,5 +1,6 @@
 import types
 from pathlib import Path
+import torch
 
 from .modeling_vision import InternVLVisionModel
 from .modeling_projector import InternVLMultiModalProjector
@@ -21,12 +22,14 @@ class InternVLForConditionalGeneration(InternS1ForConditionalGeneration):
         self.config = config
         self.select_layer = config.vision_feature_layer
         self.downsample_ratio = config.downsample_ratio
+        self.image_size = config.vision_config.image_size[0]
 
         vision_config = config.vision_config
         text_config = config.text_config
+        projector_config= config.projector_config
 
         self.vision_tower = InternVLVisionModel(vision_config)
-        self.multi_modal_projector = InternVLMultiModalProjector(config)
+        self.multi_modal_projector = InternVLMultiModalProjector(projector_config)
 
         self.language_model = text_config.build()
 
