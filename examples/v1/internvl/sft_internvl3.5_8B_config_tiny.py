@@ -12,6 +12,7 @@ from xtuner.v1.config import FSDPConfig
 from xtuner.v1.datasets.mllm_tokenize_fn import OSSLoaderConfig
 import json
 import os
+import shutil
 
 # 路径配置
 ceph_config = "/mnt/shared-storage-user/gaozhangwei/workspace_glx/petreloss.conf"
@@ -19,6 +20,12 @@ meta_data_path = '/mnt/shared-storage-user/gaozhangwei/workspace_ysl/reformat_ne
 model_path = "/mnt/shared-storage-user/intern7shared/wangweiyun/OpenGVLab-rc1-hf/InternVL3_5-8B-CPT-HF" # 转换后的权重（hf官方格式）
 work_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-sft-based-3.5tiny-data-bs32-epoch1-lr2e-5"
 tokenizer_cache_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_tokenizer_cache/internvl3.5/slow_tokenize_sft_ml_32k_tokenizer"
+
+# 将当前配置文件拷贝到work_dir
+if not os.path.exists(work_dir):
+    os.makedirs(work_dir, exist_ok=True)
+current_file = __file__
+shutil.copy(current_file, work_dir)
 
 # 训练超参数
 sample_max_length = 32768
