@@ -587,13 +587,15 @@ class Trainer:
 
             self._lr_scheduler.step()
             self._maybe_save_hf()
-            self._maybe_save(is_snapshot=False)
-            self._maybe_save(is_snapshot=True)
+            ckpt_saved = self._maybe_save(is_snapshot=False)
+            if not ckpt_saved:
+                _ = self._maybe_save(is_snapshot=True)
 
             time_before_get_data = time.time()
 
-            if self.cur_step % 50 == 0:
-                gc.collect()
+            if os.environ.get("XTUNER_DEBUG_GC", "0") == "0":
+                if self.cur_step % 50 == 0:
+                    gc.collect()
 
         # TODO: Should use flush rather than close
         self._exp_tracker.close()
@@ -805,19 +807,19 @@ class Trainer:
         )
         return lr_scheduler
 
-    def _maybe_save(self, is_snapshot: bool = False):
+    def _maybe_save(self, is_snapshot: bool = False) -> bool:
         ckp_interval = self._checkpoint_interval if not is_snapshot else self._snapshot_interval
         if ckp_interval is None:
-            return
+            return False
 
         if ckp_interval == -1:  # only save at the end of training
             if self._cur_step != self.total_step:
-                return
+                return False
         else:
             if self.cur_step % ckp_interval != 0 and (is_snapshot or self._cur_step != self.total_step):
                 # if is_snapshot, only save at interval
                 # else save at interval or at the end of training
-                return
+                return False
 
         checkpoint_path = self._get_checkpoint_path(epoch=self._cur_epoch, step=self.cur_step, is_snapshot=is_snapshot)
         checkpoint_path.mkdir(parents=True, exist_ok=True)
@@ -901,6 +903,7 @@ class Trainer:
                 f.write(self.meta.model_dump_json(indent=2))
 
         dist.barrier()
+        return True
 
     def _save_dataloader(self, dataloader_path: Path | str):
         _gathered_list = [None for _ in range(self.data_mesh["dp"].size())]
@@ -1021,7 +1024,10 @@ class Trainer:
             if torch.accelerator.current_accelerator().type == "cuda":
                 backend = "cpu:gloo,cuda:nccl"
             elif torch.accelerator.current_accelerator().type == "npu":
-                backend = "cpu:gloo,npu:hccl"
+                if os.environ.get("XTUNER_DEBUG_GLOO", "0") == "1":
+                    backend = "npu:hccl"
+                else:
+                    backend = "cpu:gloo,npu:hccl"
             else:
                 raise NotImplementedError
 
@@ -1035,6 +1041,7 @@ class Trainer:
                 work_dir.mkdir(parents=True, exist_ok=True)
 
         meta_path = work_dir / self._META_PATH
+        time.sleep(1)
         if not meta_path.exists() and self.rank == 0:
             meta = XTunerMeta(exps=[])
             with open(meta_path, "w") as f:
@@ -1381,7 +1388,8 @@ class Trainer:
         self._dataloader.load_state_dict(dataloader_state)
 
     def _setup_env(self):
-        gc.disable()
+        if os.environ.get("XTUNER_DEBUG_GC", "0") == "0":
+            gc.disable()
         os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
         log_str = "\n============XTuner Training Environment============\n"
