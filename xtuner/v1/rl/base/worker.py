@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, TypeAlias, TypedDict, cast
 
+import ray
 import requests
 import torch
 import torch.distributed as dist
@@ -15,12 +16,25 @@ from xtuner.v1.config.fsdp import FSDPConfig
 from xtuner.v1.config.optim import LRConfig, OptimConfig
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.engine.train_engine import TrainEngine
+from xtuner.v1.engine.vision_compose_train_engine import (
+    VisionComposeConfigProtocol,
+    VisionComposeModelProtocol,
+    VisionComposeTrainEngine,
+)
 from xtuner.v1.float8.float8_handler import Float8Handler
+from xtuner.v1.model.base import BaseModel as XtunerBaseModel
 from xtuner.v1.model.base import ModelItem, TransformerConfig
-from xtuner.v1.ray.accelerator import SingleAcceleratorWorker
+from xtuner.v1.model.compose.qwen3_vl import Qwen3VLForConditionalGeneration
+from xtuner.v1.ray.base import SingleAcceleratorWorker
 from xtuner.v1.ray.config import RolloutConfig
 from xtuner.v1.rl.utils import gather_logprobs
-from xtuner.v1.utils import ParallelConfigException, get_device, get_logger, get_torch_device_module
+from xtuner.v1.utils import (
+    ParallelConfigException,
+    get_device,
+    get_logger,
+    get_torch_device_module,
+    monkey_unpatch_torch_reductions,
+)
 
 from ..loss_fn import kl_penalty
 from .loss import BaseRLLossConfig, RLLossContextInputItem
@@ -98,8 +112,8 @@ class WorkerConfig(BaseModel):
        for KL divergence computation during training.
     """
 
-    model_config = ConfigDict(title="Worker config", extra="allow", arbitrary_types_allowed=True)
-    model_cfg: TransformerConfig
+    model_config = ConfigDict(title="Worker config", extra="forbid", arbitrary_types_allowed=True)
+    model_cfg: TransformerConfig | VisionComposeConfigProtocol
     optim_cfg: OptimConfig
     loss_cfg: BaseRLLossConfig
     lr_cfg: LRConfig
@@ -166,39 +180,66 @@ class TrainingWorker(SingleAcceleratorWorker):
         else:
             self.logger = get_logger()
 
-    def _build_engine(self, worker_cfg: WorkerConfig) -> TrainEngine:
-        engine = TrainEngine(
-            optim_cfg=worker_cfg.optim_cfg,
-            fsdp_cfg=worker_cfg.fsdp_cfg,
-            model_cfg=worker_cfg.model_cfg,
-        )
+    def _build_engine(self, worker_cfg: WorkerConfig) -> TrainEngine | VisionComposeTrainEngine:
+        if isinstance(worker_cfg.model_cfg, VisionComposeConfigProtocol):
+            engine = VisionComposeTrainEngine(
+                optim_cfg=worker_cfg.optim_cfg,
+                fsdp_cfg=worker_cfg.fsdp_cfg,
+                model_cfg=worker_cfg.model_cfg,
+            )
+        else:
+            engine = TrainEngine(  # type: ignore
+                optim_cfg=worker_cfg.optim_cfg,
+                fsdp_cfg=worker_cfg.fsdp_cfg,
+                model_cfg=worker_cfg.model_cfg,
+            )
+
         if worker_cfg.load_from is not None:
             engine.from_hf(worker_cfg.load_from)
-
+        # TODO: support resume
         return engine
 
     def _build_ref_model(
-        self, ref_model_cfg: TransformerConfig, load_from: str | Path, ref_model_fsdp_cfg: FSDPConfig | None = None
+        self,
+        ref_model_cfg: TransformerConfig | VisionComposeConfigProtocol,
+        load_from: str | Path,
+        ref_model_fsdp_cfg: FSDPConfig | None = None,
     ):
+        # TODO: 需要重构，使得能更优雅的兼容 mllm
+        model: VisionComposeModelProtocol | XtunerBaseModel
         with torch.device("meta"):
             model = ref_model_cfg.build()
-        if ref_model_cfg.float8_cfg is not None and ref_model_cfg.float8_cfg.enable_float8:
-            float8_handler = Float8Handler(
-                scaling_granularity_gemm=ref_model_cfg.float8_cfg.scaling_granularity_gemm,
-                scaling_granularity_grouped_gemm=ref_model_cfg.float8_cfg.scaling_granularity_grouped_gemm,
-            )
+
+        if isinstance(ref_model_cfg, VisionComposeConfigProtocol):
+            assert ref_model_cfg.text_config.float8_cfg is None, "VisionComposeConfigProtocol does not support float8"
+            if ref_model_fsdp_cfg is None:
+                ref_model_fsdp_cfg = FSDPConfig(recompute_ratio=0, cpu_offload=False, requires_grad=False)
+            model.language_model.fully_shard(ref_model_fsdp_cfg)  # type: ignore
+            model.vision_tower.fully_shard(ref_model_fsdp_cfg)  # type: ignore
+            model.multi_modal_projector.fully_shard(ref_model_fsdp_cfg)  # type: ignore
+            model = model.fully_shard(ref_model_fsdp_cfg)
+            model.from_hf(hf_path=load_from)
+            model.eval()  # type: ignore
         else:
-            float8_handler = None
-        if ref_model_fsdp_cfg is None:
-            ref_model_fsdp_cfg = FSDPConfig(recompute_ratio=0, cpu_offload=False, requires_grad=False)
-        model = model.fully_shard(ref_model_fsdp_cfg, float8_handler)
-        model.from_hf(hf_path=load_from)
-        model.eval()
-        if float8_handler is not None:
-            # As the ref model is not updated, we only compute params' scales once
-            float8_handler.precompute_float8_dynamic_scale_for_fsdp(model)
-        model.to_device("cpu")
-        DEVICE_MODULE.empty_cache()  # type: ignore
+            ref_model_cfg = cast(TransformerConfig, ref_model_cfg)
+            if ref_model_cfg.float8_cfg is not None and ref_model_cfg.float8_cfg.enable_float8:
+                float8_handler = Float8Handler(
+                    scaling_granularity_gemm=ref_model_cfg.float8_cfg.scaling_granularity_gemm,
+                    scaling_granularity_grouped_gemm=ref_model_cfg.float8_cfg.scaling_granularity_grouped_gemm,
+                )
+            else:
+                float8_handler = None
+            if ref_model_fsdp_cfg is None:
+                ref_model_fsdp_cfg = FSDPConfig(recompute_ratio=0, cpu_offload=False, requires_grad=False)
+            model = model.fully_shard(ref_model_fsdp_cfg, float8_handler)  # type: ignore
+
+            model.from_hf(hf_path=load_from)
+            model.eval()  # type: ignore
+            if float8_handler is not None:
+                # As the ref model is not updated, we only compute params' scales once
+                float8_handler.precompute_float8_dynamic_scale_for_fsdp(model)  # type: ignore
+        model.to_device("cpu")  # type: ignore
+        DEVICE_MODULE.empty_cache()
         return model
 
     def _init_data_mesh(
@@ -270,6 +311,40 @@ class TrainingWorker(SingleAcceleratorWorker):
         loss_ctx_input_list: list[RLLossContextInputItem] = []
         rollout_logprobs_list: list[torch.Tensor | None] = []
         for data in data_batches:
+            seq_ctx = data["seq_ctx"]
+            pixel_values = seq_ctx.pixel_values
+            if pixel_values is not None:
+                if not isinstance(pixel_values, torch.Tensor):
+                    assert isinstance(pixel_values, list), (
+                        f"pixel_values should be list of tensor, got {type(pixel_values)}"
+                    )
+                    pixel_values = [ray.get(pixel_obf) for pixel_obf in pixel_values]
+                    pixel_values = torch.cat(pixel_values, dim=0)
+                    seq_ctx.pixel_values = pixel_values
+
+            rollout_routed_experts = seq_ctx.rollout_routed_experts
+            if rollout_routed_experts is not None:
+                if isinstance(rollout_routed_experts, list):
+                    # list[n,l,e]
+                    if not isinstance(rollout_routed_experts[0], torch.Tensor):
+                        rollout_routed_experts_refs = rollout_routed_experts
+                        rollout_routed_experts = [ray.get(routed_experts) for routed_experts in rollout_routed_experts]
+                        # free obj store explicitly
+                        for ref in rollout_routed_experts_refs:
+                            ray._private.internal_api.free(ref)
+                        if not isinstance(rollout_routed_experts[0], torch.Tensor):
+                            rollout_routed_experts = [
+                                torch.as_tensor(routed_experts, dtype=torch.long)
+                                for routed_experts in rollout_routed_experts
+                            ]
+                    seq_ctx.rollout_routed_experts = torch.cat(rollout_routed_experts, dim=0)  # max_len,l,e
+                else:
+                    rollout_routed_experts = ray.get(rollout_routed_experts)
+                    seq_ctx.rollout_routed_experts = rollout_routed_experts
+
+                assert seq_ctx.input_ids is not None, "input_ids is None"
+                assert seq_ctx.rollout_routed_experts.size(0) == seq_ctx.input_ids.size(1)
+
             seq_ctx = data["seq_ctx"].to(DEVICE)
             loss_ctx_input = RLLossContextInputItem(
                 shifted_labels=data["shifted_labels"],
@@ -320,7 +395,7 @@ class TrainingWorker(SingleAcceleratorWorker):
                     f"rollout_logprobs {rollout_logprobs.shape} vs old_logprobs {old_logprobs.shape}"
                 )
                 if rollout_logprobs.numel() == 0:  # pad 情况下是空的
-                    min_diff = torch.tensor(0)
+                    min_diff = torch.tensor(0.0)
                     max_diff = min_diff
                     std_diff = min_diff
                     mean_diff = min_diff
@@ -329,7 +404,7 @@ class TrainingWorker(SingleAcceleratorWorker):
                     max_diff = torch.max(rollout_logprobs - old_logprobs)
                     mean_diff = torch.mean(rollout_logprobs - old_logprobs)
                     if rollout_logprobs.numel() == 1:
-                        std_diff = torch.tensor(0)
+                        std_diff = torch.tensor(0.0)
                     else:
                         std_diff = torch.std(rollout_logprobs - old_logprobs)
                 all_diffs.append((min_diff, max_diff, mean_diff, std_diff))
@@ -337,7 +412,9 @@ class TrainingWorker(SingleAcceleratorWorker):
         logger_msg = f"Rollout {rollout_idx}: "
 
         if len(rollout_logprobs_list) > 0:
-            all_diffs_tensor = torch.stack([torch.tensor(d).to(DEVICE) for d in all_diffs])  # n, 4
+            all_diffs_tensor = torch.stack([torch.tensor(d).to(DEVICE) for d in all_diffs]).to(
+                dtype=torch.float32
+            )  # n, 4
             min_diff_val = torch.min(all_diffs_tensor[:, 0]).item()
             max_diff_val = torch.max(all_diffs_tensor[:, 1]).item()
             mean_diff_val = torch.mean(all_diffs_tensor[:, 2]).item()
@@ -423,6 +500,10 @@ class TrainingWorker(SingleAcceleratorWorker):
         # sp will affect the data replicate size in worker
         return self._engine.data_replicate_size * self.sp_mesh.size()
 
+    def get_model_cfg(self):
+        model_cfg = self._engine.model_cfg
+        return model_cfg
+
     def offload_model(self):
         self._engine.put_model_to_device("cpu")
         DEVICE_MODULE.empty_cache()
@@ -466,6 +547,8 @@ class TrainingWorker(SingleAcceleratorWorker):
                 "lmdeploy_backend", "pytorch"
             )
 
+    # TODO(hha): 这个逻辑和某个模型绑定死了。一定要重构掉
+    # TODO(hha): 如果有 freeze 参数应该不需要同步
     def update_weights(self):
         """Update the model weights."""
         self.endpoints["update_weights"] = "update_weights"
@@ -474,10 +557,14 @@ class TrainingWorker(SingleAcceleratorWorker):
         model = self._engine.model
         DEVICE_MODULE.empty_cache()
 
-        if (model.config.float8_cfg is not None) and (model.config.float8_cfg.enable_float8):
-            dtype = torch.float8_e4m3fn
-        else:
+        if isinstance(model.config, VisionComposeConfigProtocol):
+            # TODO: support float8 for vision compose model
             dtype = torch.bfloat16
+        else:
+            if (model.config.float8_cfg is not None) and (model.config.float8_cfg.enable_float8):
+                dtype = torch.float8_e4m3fn
+            else:
+                dtype = torch.bfloat16
 
         def get_params(tensor_list, name_list, save_dtype):
             _tensor_list, _spec_list = list(zip(*tensor_list))
@@ -489,15 +576,38 @@ class TrainingWorker(SingleAcceleratorWorker):
             return fsdp_unshard_tensor_list, name_list
 
         saved_list = []
-        for i, layer in tqdm.tqdm(model.layers.items(), desc="[gather weight]"):
+        is_qwen3vl = False
+        if isinstance(model.config, VisionComposeConfigProtocol):
+            language_model = model.language_model
+            if isinstance(model, Qwen3VLForConditionalGeneration):
+                is_qwen3vl = True
+        else:
+            language_model = model
+
+        if is_qwen3vl:
+            vision_hf_prefix = "model.visual."
+            projector_hf_prefix = "model.visual."
+        else:
+            vision_hf_prefix = "model.vision_tower."
+            projector_hf_prefix = "model.multi_modal_projector."
+
+        for i, layer in tqdm.tqdm(language_model.layers.items(), desc="[gather weight]"):
             tensor_list = []
             name_list = []
             for sub_name, param in layer.state_dict().items():
-                saved_list.append(f"layers.{i}.{sub_name}")
+                if isinstance(model.config, VisionComposeConfigProtocol):
+                    saved_list.append(f"language_model.layers.{i}.{sub_name}")
+                else:
+                    saved_list.append(f"layers.{i}.{sub_name}")
                 local_tensor = param._local_tensor if isinstance(param, DTensor) else param
                 local_tensor = local_tensor.bfloat16()
-                load_spec = model.load_spec_mapping.get(f"layers.{i}.{sub_name}")
-                name = f"model.layers.{i}.{sub_name}"
+                load_spec = language_model.load_spec_mapping.get(f"layers.{i}.{sub_name}")
+
+                if isinstance(model.config, VisionComposeConfigProtocol):
+                    name = f"model.language_model.layers.{i}.{sub_name}"
+                else:
+                    name = f"model.layers.{i}.{sub_name}"
+
                 if ".experts." in name and ".mlp.experts." not in name:
                     name = name.replace(".experts.", ".mlp.experts.")
                 if ".gate." in name and ".mlp.gate." not in name:
@@ -514,18 +624,29 @@ class TrainingWorker(SingleAcceleratorWorker):
                     state_dict.append((name, tensor))
                 self.request_update_params(state_dict)
 
-        tensor_list = []
-        name_list = []
         for name, param in model.state_dict().items():
             if name in saved_list:
                 continue
             local_tensor = param._local_tensor if isinstance(param, DTensor) else param
             local_tensor = local_tensor.bfloat16()
             load_spec = model.load_spec_mapping.get(name)
-            if name == "norm.weight":
-                name = "model.norm.weight"
-            elif name == "embed_tokens.weight":
-                name = "model.embed_tokens.weight"
+
+            if isinstance(model.config, VisionComposeConfigProtocol):
+                if "vision_tower." in name:
+                    name = name.replace("vision_tower.", vision_hf_prefix)
+                elif "multi_modal_projector." in name:
+                    name = name.replace("multi_modal_projector.", projector_hf_prefix)
+                elif name == "language_model.norm.weight":
+                    name = "model.language_model.norm.weight"
+                elif name == "language_model.embed_tokens.weight":
+                    name = "model.language_model.embed_tokens.weight"
+                elif name == "language_model.lm_head.weight":
+                    name = "lm_head.weight"
+            else:
+                if name == "norm.weight":
+                    name = "model.norm.weight"
+                elif name == "embed_tokens.weight":
+                    name = "model.embed_tokens.weight"
             tensor_list = [(local_tensor, load_spec)]
             name_list = [name]
             fsdp_unshard_tensor_list, name_list = get_params(tensor_list, name_list, dtype)
@@ -742,16 +863,42 @@ class TrainingWorker(SingleAcceleratorWorker):
             # TODO(chenchiyu): remove lmdeploy related code
             from lmdeploy.utils import serialize_state_dict
 
+            try:
+                from lmdeploy.utils import FlattenedTensorBucket
+
+                use_flattened_tensor_bucket = True
+            except Exception:
+                use_flattened_tensor_bucket = False
+
             if self.rollout_cfg_info["backend"] == "pytorch" and self.rollout_cfg_info["tp"] > 1:
                 serialized_data = [None] * self.rollout_cfg_info["tp"]
+                if use_flattened_tensor_bucket:
+                    flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=list(state_dict.items()))
+                    metadata = flattened_tensor_bucket.get_metadata()
+                    flattened_tensor_data = {
+                        "flattened_tensor": flattened_tensor_bucket.get_flattened_tensor(),
+                        "metadata": metadata,
+                    }
+                    tp_serialized_data = serialize_state_dict(flattened_tensor_data)
+                else:
+                    tp_serialized_data = serialize_state_dict(state_dict)
                 dist.gather_object(
-                    serialize_state_dict(state_dict),
+                    tp_serialized_data,
                     serialized_data if dist.get_rank() == head_rank else None,
                     dst=head_rank,
                     group=cpu_group,
                 )
             elif self.rollout_cfg_info["backend"] == "pytorch":
-                serialized_data = serialize_state_dict(state_dict)
+                if use_flattened_tensor_bucket:
+                    flattened_tensor_bucket = FlattenedTensorBucket(named_tensors=list(state_dict.items()))
+                    metadata = flattened_tensor_bucket.get_metadata()
+                    flattened_tensor_data = {
+                        "flattened_tensor": flattened_tensor_bucket.get_flattened_tensor(),
+                        "metadata": metadata,
+                    }
+                    serialized_data = serialize_state_dict(flattened_tensor_data)
+                else:
+                    serialized_data = serialize_state_dict(state_dict)
             else:
                 # for turbomind backend, only head_rank should serialize data
                 serialized_data = serialize_state_dict(state_dict) if dist.get_rank() == head_rank else None
@@ -767,6 +914,7 @@ class TrainingWorker(SingleAcceleratorWorker):
             except Exception:
                 use_flattened_tensor_bucket = False
 
+            # NOTE: xtuner目前去掉sglang的patch也不会出问题，但为了保险起见，还是保留patch逻辑，并且在update_weights结束后unpatch
             monkey_patch_torch_reductions()
             if self.rollout_cfg_info["tp"] == 1:
                 if use_flattened_tensor_bucket:
@@ -832,6 +980,16 @@ class TrainingWorker(SingleAcceleratorWorker):
                 response.raise_for_status()
             else:
                 data = dict(serialized_named_tensors=serialized_data, finished=finished)
+                try:
+                    from lmdeploy.utils import FlattenedTensorBucket
+
+                    use_flattened_tensor_bucket = True
+                except Exception:
+                    use_flattened_tensor_bucket = False
+
+                if use_flattened_tensor_bucket:
+                    data["load_format"] = "flattened_bucket"
+
                 response = requests.post(
                     f"{self.rollout_url}/{self.endpoints['update_weights']}", headers=headers, json=data
                 )
@@ -839,4 +997,6 @@ class TrainingWorker(SingleAcceleratorWorker):
 
         if finished:
             dist.barrier(group=cpu_group)
+
+        monkey_unpatch_torch_reductions()
         return

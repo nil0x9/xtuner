@@ -11,6 +11,7 @@ from typing_extensions import Self
 
 from xtuner.v1.loss import BaseLossConfig, BaseLossContext, BaseLossKwargs
 
+# from xtuner.v1.profiler.prober import ProberList
 from .utils import sp_gather, sp_split
 
 
@@ -58,7 +59,7 @@ class CELossContextInputItem(BaseModel):
         shifted_labels (torch.Tensor): The shifted labels for the input sequences.
     """
 
-    model_config = ConfigDict(title="CELossContextInputItem", extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(title="CELossContextInputItem", extra="forbid", arbitrary_types_allowed=True)
     shifted_labels: torch.Tensor
 
     def sp_split(self, sp_mesh: DeviceMesh) -> Self:
@@ -153,6 +154,7 @@ class CELossContext(BaseLossContext[CELossContextInputItem]):
         for i, item in enumerate(data_batches):
             shifted_labels = shifted_labels_list[i]
             loss_weight = loss_weight_list[i]
+            # Step 2.a in the loss calculation: normalize the loss weight by the global denominator
             loss_weight = loss_weight / (global_denominator + 1e-12)
             loss_kwargs = CELossKwargs(
                 shifted_labels=shifted_labels,
@@ -184,6 +186,7 @@ class CELossContext(BaseLossContext[CELossContextInputItem]):
             loss = logits.sum() * 0
         else:
             loss = F.cross_entropy(logits, shifted_labels, reduction="none", ignore_index=self.loss_cfg.ignore_idx)
+            # Step 2.b in the loss calculation: sum the loss over all tokens
             loss = (loss * loss_weight).sum()
 
         return loss, (logits, {})
@@ -206,8 +209,10 @@ class CELossContext(BaseLossContext[CELossContextInputItem]):
             hidden_states = hidden_states.reshape(bs * seq, dim)
             shifted_labels = shifted_labels.flatten()
             # liger kernel dont support reduction=="none"
+            # step 2.b in the loss calculation: sum the loss over all tokens, then multiply the loss weight (i.e. divide by the global_denominator)
             loss = self.liger_loss_fct(head_weight, hidden_states, shifted_labels)
+            # ProberList.record_tensor(loss, "[lm_head.ce_loss][before calibration]loss")
             mask = loss_weight != 0
-            w = loss_weight.sum() / mask.sum()
+            w = loss_weight.sum() / mask.sum()  # w equals to 1/global_denominator
             loss = loss * w
             return loss, (None, {})

@@ -21,6 +21,7 @@ class TrainingController:
     def __init__(self, workers: list[TrainingWorker]) -> None:
         self.workers = workers
 
+    # TODO(hha): 这个逻辑不够通用，应该复用 sft 函数，从而支持 expand soft pack
     def _get_pack_infos(self, dataset, num_tokens, target, random=None):
         inds = list(range(len(dataset)))
         if random is not None:
@@ -58,13 +59,26 @@ class TrainingController:
 
         return pack_infos
 
-    def _packing(self, data_batches, pack_max_length):
+    # TODO(hha): 这个逻辑不够通用，和模型绑定了
+    def _packing(self, data_batches, pack_max_length, model_cfg):
         pack_infos = self._get_pack_infos(
             data_batches,
             [data["seq_ctx"].input_ids.numel() for data in data_batches],
             pack_max_length,
         )
         packed_data_batches = []
+
+        is_qwen3_vl = False
+        if len(data_batches[0]["seq_ctx"].position_ids.shape) == 3:
+            is_qwen3_vl = True
+
+        has_rollout_routed_experts = False
+        if data_batches[0]["seq_ctx"].rollout_routed_experts is not None:
+            has_rollout_routed_experts = True
+            n_routed_experts = model_cfg.n_routed_experts
+            num_experts_per_tok = model_cfg.num_experts_per_tok
+            num_hidden_layers = model_cfg.num_hidden_layers
+
         for pack_info in pack_infos:
             indices = pack_info["indices"]
             total_len = sum([data_batches[i]["seq_ctx"].input_ids.shape[1] for i in indices])
@@ -95,6 +109,19 @@ class TrainingController:
                     dtype=data_batches[0]["shifted_labels"].dtype,
                     device=data_batches[0]["shifted_labels"].device,
                 )
+                if is_qwen3_vl:
+                    _position_ids_list = []
+                    for pad_token in pad_tokens:
+                        _position_ids = torch.arange(pad_token.size(-1)).view(1, 1, -1).expand(3, 1, -1)
+                        _position_ids_list.append(_position_ids)
+                    pad_seq_ctx.position_ids = torch.cat(_position_ids_list, dim=-1)
+
+                if has_rollout_routed_experts:
+                    pad_rand_index = torch.randint(
+                        low=0, high=n_routed_experts, size=(pad_len, num_hidden_layers, num_experts_per_tok)
+                    )
+                    pad_seq_ctx.rollout_routed_experts = ray.put(pad_rand_index)
+
                 seq_ctx_list.append(pad_seq_ctx)
                 label_list.append(pad_labels)
                 advantage_list.extend(
@@ -138,8 +165,22 @@ class TrainingController:
         return sorted(packed_data_batches, key=lambda x: x["seq_ctx"].max_length_q, reverse=True)
 
     def fit(self, data_batches: list[ColateItem], pack_max_length: int, rollout_idx: int):
-        packed_data_batches = self._packing(data_batches, pack_max_length)
+        has_rollout_routed_experts = False
+        model_cfg = None
+        if data_batches[0]["seq_ctx"].rollout_routed_experts is not None:
+            model_cfg = ray.get(self.workers[0].get_model_cfg.remote())  # type: ignore[attr-defined]
+            has_rollout_routed_experts = True
+            n_routed_experts = model_cfg.n_routed_experts
+            num_experts_per_tok = model_cfg.num_experts_per_tok
+            num_hidden_layers = model_cfg.num_hidden_layers
+
+        packed_data_batches = self._packing(data_batches, pack_max_length, model_cfg)
         # packed_data_batches = self._grouped_by_max_length(packed_data_batches)
+
+        # TODO(hha): 这个逻辑不够通用，和模型绑定了
+        is_qwen3_vl = False
+        if len(packed_data_batches[0]["seq_ctx"].position_ids.shape) == 3:
+            is_qwen3_vl = True
 
         # todo: support round up
         num_packed_data_batches = len(packed_data_batches)
@@ -148,11 +189,13 @@ class TrainingController:
         pad_num = math.ceil(num_packed_data_batches / dp_size) * dp_size - num_packed_data_batches
         if pad_num > 0:
             # Reduce the attn calculation time by using multiple short sequence packs
+            assert data_batches[0]["seq_ctx"].input_ids is not None
             pad_tokens = tuple(
                 torch.zeros(1, 1024, dtype=data_batches[0]["seq_ctx"].input_ids.dtype, device="cpu")
                 for _ in range(pack_max_length // 1024)
             )
             if pack_max_length % 1024 > 0:
+                assert data_batches[0]["seq_ctx"].input_ids is not None
                 pad_tokens = pad_tokens + (
                     torch.zeros(
                         1, pack_max_length % 1024, dtype=data_batches[0]["seq_ctx"].input_ids.dtype, device="cpu"
@@ -160,6 +203,13 @@ class TrainingController:
                 )
             pad_seq_ctx = SequenceContext.from_input_ids(pad_tokens, device="cpu")  # type: ignore
             pad_seq_ctx.num_padding = pack_max_length
+            if is_qwen3_vl:
+                _position_ids_list = []
+                for pad_token in pad_tokens:
+                    _position_ids = torch.arange(pad_token.size(-1)).view(1, 1, -1).expand(3, 1, -1)
+                    _position_ids_list.append(_position_ids)
+                pad_seq_ctx.position_ids = torch.cat(_position_ids_list, dim=-1)  # type: ignore
+
             pad_shifted_labels = torch.full(
                 (1, pack_max_length),
                 -100,
@@ -172,6 +222,12 @@ class TrainingController:
                 dtype=packed_data_batches[0]["advantages"].dtype,
                 device="cpu",
             )
+
+            if has_rollout_routed_experts:
+                pad_rand_index = torch.randint(
+                    low=0, high=n_routed_experts, size=(pack_max_length, num_hidden_layers, num_experts_per_tok)
+                )
+                pad_seq_ctx.rollout_routed_experts = ray.put(pad_rand_index)
 
             pad_rollout_logprobs = None
             if "rollout_logprobs" in packed_data_batches[0] and packed_data_batches[0]["rollout_logprobs"] is not None:

@@ -1,8 +1,11 @@
+import json
+import os
+import socket
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
 from cyclopts import Group, Parameter
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing_extensions import Annotated
 
 
@@ -14,6 +17,7 @@ infer_group = Group("inference", help="Inference worker configuration.")
 class TrainingWorkerConfig(BaseModel):
     """Configuration for the TrainingWorker."""
 
+    model_config = ConfigDict(extra="forbid")
     type: Literal["train"] = "train"
     train_model_path: Annotated[str, Parameter(group=train_group, help="Path to the training model.")]
 
@@ -30,23 +34,22 @@ class RolloutConfig(BaseModel):
         model_path (str | Path): Path to the inference model.
         model_name (str): Model name for the backend engine.
         tokenizer_path (str): Path to the model tokenizer. Defaults to "".
-        api_key (Optional[Union[List[str], str]]): API keys for rollout service.
-            Supports single key or list of keys. Defaults to None.
-
+        api_key (Optional[Union[List[str], str]]): API keys for rollout service. Supports single key or list of keys. Defaults to None.
+        api_port (Optional[int]): Port number for the rollout API server. If not set, it will find an available port starting from 8000. Defaults to 8000.
         gpus_per_node (int): Number of GPUs per node. Defaults to 8.
         dtype (str): Model data type ('bfloat16', 'float16', 'int8'). Defaults to "bfloat16".
         gpu_memory_utilization (float): GPU memory utilization ratio. Defaults to 0.85.
         random_seed (int): Random seed for reproducible generation. Defaults to 1024.
-
         rollout_cross_node_comm (bool): Enable cross-node communication. Defaults to False.
+        rollout_max_batch_size_per_instance (int): Maximum batch size for the rollout worker. If not set, it will be determined automatically based on `context_length`. Defaults to 512.
+        allow_over_concurrency_ratio (float): Factor to allow over-concurrency in HTTP requests for the rollout worker to improve GPU utilization. Defaults to 1.2.
         tensor_parallel_size (int): GPUs per inference engine (tensor parallelism). Defaults to 1.
         expert_parallel_size (int): Experts per inference engine (expert parallelism). Defaults to 1.
-
         enable_chunked_prefill (bool): Enable chunked prefill for memory efficiency. Defaults to False.
         chunked_prefill_size (int): Chunk size for prefill operations. Defaults to 128.
         skip_load_weights (bool): Skip weight loading for rollout worker. Defaults to False.
         rollout_timeout (float): Timeout duration in seconds for rollout requests. Defaults to 3600.0.
-
+        context_length (int): Context length for the rollout worker.
         launch_server_method (Literal["ray", "multiprocessing"]): Server launch method. Defaults to "ray".
         system_prompt (Optional[str]): System prompt to guide generation behavior. Defaults to None.
         extra_rollout_config (Optional[dict]): Backend-specific configurations using engine prefixes
@@ -67,14 +70,21 @@ class RolloutConfig(BaseModel):
         )
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # base config
     env: Annotated[
         str,
         Parameter(group=infer_group, help="Environment variables to set for the rollout."),
     ] = ""
+    device: Annotated[str, Parameter(group=infer_group, help="Device to be used for the rollout worker.")] = "GPU"
     model_path: Annotated[str | Path, Parameter(group=infer_group, help="Path to the SGLang model.")]
-    model_name: Annotated[str, Parameter(group=infer_group, help="Name of the model to be used in the LMDeploy.")]
-    tokenizer_path: Annotated[str, Parameter(group=infer_group, help="Path to the tokenizer for the model.")]
+    model_name: Annotated[
+        str | None, Parameter(group=infer_group, help="Name of the model to be used in the LMDeploy.")
+    ] = None
+    tokenizer_path: Annotated[
+        str | None, Parameter(group=infer_group, help="Path to the tokenizer for the model.")
+    ] = None
     api_key: Annotated[
         Optional[Union[List[str], str]],
         Parameter(
@@ -103,13 +113,20 @@ class RolloutConfig(BaseModel):
             help="Whether to enable cross-node communication for the rollout worker.",
         ),
     ] = False
-    rollout_max_batch_size: Annotated[
-        Optional[int],
+    rollout_max_batch_size_per_instance: Annotated[
+        int,
         Parameter(
             group=infer_group,
             help="Maximum batch size for the rollout worker. If not set, it will be determined automatically based on the model and GPU memory.",
         ),
-    ] = None
+    ] = 512
+    allow_over_concurrency_ratio: Annotated[
+        float,
+        Parameter(
+            group=infer_group,
+            help="Factor to allow over concurrency in the http request for rollout worker to improve GPU utilization.",
+        ),
+    ] = 1.2
     tensor_parallel_size: Annotated[
         int,
         Parameter(
@@ -146,6 +163,13 @@ class RolloutConfig(BaseModel):
             help="Whether to skip loading weights for the rollout worker.",
         ),
     ] = False
+    enable_return_routed_experts: Annotated[
+        bool,
+        Parameter(
+            group=infer_group,
+            help="Whether to enable returning routed experts for the rollout worker.",
+        ),
+    ] = False
     launch_server_method: Annotated[
         Literal["ray", "multiprocessing"],
         Parameter(
@@ -159,7 +183,7 @@ class RolloutConfig(BaseModel):
             group=infer_group,
             help="Timeout duration (in seconds) for rollout requests.",
         ),
-    ] = 3600.0
+    ] = 1200.0
     context_length: Annotated[
         Optional[int],
         Parameter(
@@ -175,6 +199,77 @@ class RolloutConfig(BaseModel):
         ),
     ] = {"lmdeploy_log_level": "CRITICAL", "lmdeploy_uvicorn_log_level": "CRITICAL"}
     worker_log_dir: Annotated[Path, Parameter(help="Directory to save worker logs.")] = Path.cwd() / "work_dir"
+
+    def __init__(self, **kwargs):
+        if "model_name" not in kwargs:
+            model_name_from_config = None
+            model_path = Path(kwargs["model_path"])
+            config_json_path = model_path / "config.json"
+            try:
+                with open(config_json_path, encoding="utf-8") as f:
+                    config_data = json.load(f)
+                    model_name_from_config = config_data.get("model_type")
+            except (json.JSONDecodeError, OSError):
+                pass
+
+            if model_name_from_config:
+                kwargs["model_name"] = model_name_from_config
+            else:
+                kwargs["model_name"] = model_path.name
+
+        if "tokenizer_path" not in kwargs:
+            kwargs["tokenizer_path"] = str(kwargs["model_path"])
+
+        port = kwargs.get("api_port", 8000)
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(("localhost", port))
+                    break
+                except OSError:
+                    port += 1
+        kwargs["api_port"] = port
+
+        if "device" in kwargs and kwargs["device"] == "NPU":
+            kwargs["gpus_per_node"] = 16
+        else:
+            kwargs["gpus_per_node"] = 8
+
+        rollout_backend = ""
+        if os.environ.get("XTUNER_USE_SGLANG", "0") == "1":
+            rollout_backend = "sglang"
+        elif os.environ.get("XTUNER_USE_VLLM", "0") == "1":
+            rollout_backend = "vllm"
+        elif os.environ.get("XTUNER_USE_LMDEPLOY", "0") == "1":
+            rollout_backend = "lmdeploy"
+
+        assert rollout_backend in ["sglang", "vllm", "lmdeploy"], (
+            f"Unsupported rollout backend: {rollout_backend}. Please set XTUNER_USE_SGLANG, XTUNER_USE_VLLM, or XTUNER_USE_LMDEPLOY to 1."
+        )
+        if rollout_backend == "sglang":
+            kwargs["launch_server_method"] = "multiprocessing"
+            kwargs["rollout_cross_node_comm"] = False
+        else:
+            kwargs["launch_server_method"] = "ray"
+            kwargs["rollout_cross_node_comm"] = True
+
+        if "rollout_max_batch_size_per_instance" not in kwargs:
+            assert "context_length" in kwargs, (
+                "`context_length` must be provided to determine `rollout_max_batch_size_per_instance`."
+            )
+
+            context_length = kwargs["context_length"]
+
+            # TODO(@duanyanhui): Provide better suggestions for different models/input-output lengths
+            if context_length <= 4096:
+                kwargs["rollout_max_batch_size_per_instance"] = 1024
+            elif context_length <= 8192:
+                kwargs["rollout_max_batch_size_per_instance"] = 512
+            else:
+                kwargs["rollout_max_batch_size_per_instance"] = 128
+
+        super().__init__(**kwargs)
+        self.worker_log_dir.mkdir(parents=True, exist_ok=True)
 
 
 if __name__ == "__main__":

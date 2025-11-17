@@ -177,6 +177,7 @@ class InternS1VLTokenizeFunction(BaseMLLMTokenizeFunction[InternS1DataItem]):
 
         self.add_eos_token = add_eos_token
         self.add_bos_token = add_bos_token
+        self.bos_token_id = None
         if self.add_bos_token and tokenizer.bos_token is None:
             logger.warning("tokenizer has no bos_token, set add_bos_token=False")
             self.add_bos_token = False
@@ -548,7 +549,7 @@ class InternS1VLTokenizeFunction(BaseMLLMTokenizeFunction[InternS1DataItem]):
 
 
 class InternS1VLTokenizeFnConfig(BaseMLLMTokenizeFnConfig):
-    model_config = ConfigDict(title="Base dataset config for xtuner", extra="allow")
+    model_config = ConfigDict(title="Base dataset config for xtuner", extra="forbid")
     model_cfg: (
         BaseModel  # TODO: (huanghaian)  Using model config protocol rather than directly using InternS1BaseConfig
     )

@@ -103,8 +103,6 @@ class BaseMLLMTokenizeFunction(CachableTokenizeFunction[T]):
         tokenizer_hash: str | None = None,
         hash: str | None = None,
     ):
-        super().__init__()
-        self.tokenizer = tokenizer
         self.max_length = max_length
         self._tokenizer_hash = tokenizer_hash
         self._hash = hash
@@ -114,6 +112,7 @@ class BaseMLLMTokenizeFunction(CachableTokenizeFunction[T]):
         self._image_path: list[str] = []
         self._video_path: list[str] = []
         self._image_wh_list: list[list] = []
+        super().__init__(tokenizer)
 
     def calc_num_tokens_multi_modal_get_item(self, data_item: dict) -> CacheItem:
         raise NotImplementedError
@@ -188,7 +187,7 @@ class BaseMLLMTokenizeFunction(CachableTokenizeFunction[T]):
 class BaseMLLMTokenizeFnConfig(BaseModel):
     model_config = ConfigDict(
         title="Base dataset config for xtuner",
-        extra="allow",
+        extra="forbid",
         protected_namespaces=(),
     )
     system_message: str | None = None
@@ -206,5 +205,6 @@ class BaseMLLMTokenizeFnConfig(BaseModel):
 
 
 class OSSLoaderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     backend: Literal["petrel"] = "petrel"
     backend_kwargs: dict = {}

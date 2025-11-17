@@ -45,7 +45,7 @@ from .chunk_loss import ChunkLoss
 class BaseLossKwargs(BaseModel):
     """Everything needed to compute the loss."""
 
-    model_config = ConfigDict(title="loss keyword arguments", extra="allow", arbitrary_types_allowed=True)
+    model_config = ConfigDict(title="loss keyword arguments", extra="forbid", arbitrary_types_allowed=True)
     shifted_labels: torch.Tensor
 
     def chunk(self, chunk_size) -> list["BaseLossKwargs"]:
@@ -67,7 +67,7 @@ class BaseLossKwargs(BaseModel):
 
 
 class BaseLossConfig(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = ConfigDict(title="BaseLossConfig", extra="forbid", arbitrary_types_allowed=True)
     ignore_idx: Annotated[int, Parameter(help="ignore index for loss calculation")] = -100
     mode: Annotated[Literal["eager", "chunk"], Parameter(help="loss calculation mode")] = "eager"
     chunk_size: Annotated[int | None, Parameter(help="chunk size when mode is chunk")] = 1024
@@ -151,7 +151,7 @@ class BaseLossContext(nn.Module, ABC, Generic[LossContextInputItem]):
 
         extra_info["log_rank_loss"] = loss.detach().clone()
 
-        # Step 2.c in the loss calculation
+        # Step 2.c in the loss calculation: reduce the loss over all ranks using all_reduce with autograd support
         if dist.is_initialized():
             loss = all_reduce(loss, op=dist.ReduceOp.SUM, group=dist.group.WORLD)
 
