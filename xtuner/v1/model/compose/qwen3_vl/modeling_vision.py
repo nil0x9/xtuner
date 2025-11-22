@@ -21,6 +21,7 @@ from torch.distributed.device_mesh import init_device_mesh
 import torch.distributed as dist
 from xtuner.v1.utils.compile import maybe_compile
 from xtuner.v1.model.utils.checkpointing import checkpoint_wrapper
+from xtuner.v1.module import AttnOutputs
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl
 from tqdm import tqdm
 
@@ -137,7 +138,7 @@ class Qwen3VLVisionAttention(nn.Module):
         key_states = key_states.transpose(0, 1).unsqueeze(0)
         value_states = value_states.transpose(0, 1).unsqueeze(0)
 
-        attn_output, extra_info = self.attn_impl_func(  # type: ignore
+        attn_op_outputs = self.attn_impl_func(
             query_states,  # [b, n_head, seq, head_dim]
             key_states,
             value_states,
@@ -150,10 +151,15 @@ class Qwen3VLVisionAttention(nn.Module):
             causal=False,
             deterministic=XTUNER_DETERMINISTIC
         )  # [b, seq, n_head, head_dim]
-        
-        attn_output = attn_output[0].reshape(seq_length, -1).contiguous()  # s, d
-        attn_output = self.proj(attn_output)
-        return attn_output, extra_info
+
+        raw_output = attn_op_outputs["raw_output"]
+        raw_output = raw_output[0].reshape(seq_length, -1).contiguous()  # s, d
+        projected_output = self.proj(raw_output)
+        attn_outputs: AttnOutputs = {
+            "projected_output": projected_output,
+            **attn_op_outputs,
+        }
+        return attn_outputs
 
 
 class Qwen3VLVisionLayer(nn.Module):

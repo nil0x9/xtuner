@@ -8,13 +8,14 @@ from mmengine import is_installed
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 from torch.distributed.tensor import DTensor
+from typing_extensions import overload
 
 from transformers.models.llama.modeling_llama import repeat_kv
 from xtuner.v1.config import GenerateConfig
 from xtuner.v1.data_proto import SequenceContext
 from xtuner.v1.float8.config import Float8Config
 from xtuner.v1.module.rope import RopeScalingConfig
-from xtuner.v1.ops import AttnOpOutputs, attn_impl_mapping, flash_attn_varlen_func, get_apply_rotary_emb
+from xtuner.v1.ops import attn_impl_mapping, flash_attn_varlen_func, get_apply_rotary_emb
 from xtuner.v1.ops.comm.all_to_all import ulysses_all_to_all
 from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_device, get_logger
 
@@ -380,7 +381,7 @@ class MultiHeadAttention(nn.Module):
                 sinks = self.sinks
             kwargs["s_aux"] = sinks
         # [b, n_head, seq, head_dim]
-        attn_op_outputs: AttnOpOutputs = self.attn_impl_func(  # type: ignore
+        attn_op_outputs = self.attn_impl_func(
             query_states,
             key_states,
             value_states,
@@ -439,10 +440,12 @@ class MultiHeadAttention(nn.Module):
 
         return cache_k, cache_v
 
-    @property
-    def name(self):
-        return self._name
+    @overload  # type: ignore
+    def __call__(
+        self,
+        hidden_states: torch.Tensor,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor],
+        seq_ctx: SequenceContext,
+    ) -> AttnOutputs: ...
 
-    @name.setter
-    def name(self, value: str):
-        self._name = value
+    __call__ = nn.Module.__call__

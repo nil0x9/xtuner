@@ -1,4 +1,4 @@
-from typing import Literal, cast
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -89,7 +89,7 @@ class DenseDecoderLayer(nn.Module):
             position_embeddings=position_embeddings,
             seq_ctx=seq_ctx,
         )
-        hidden_states = cast(torch.Tensor, attn_outputs["projected_output"])
+        hidden_states = attn_outputs["projected_output"]
         hidden_states = residual + hidden_states
 
         # Fully Connected

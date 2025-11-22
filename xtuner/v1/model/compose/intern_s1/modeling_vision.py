@@ -35,6 +35,7 @@ from xtuner.v1.module import RMSNorm
 from xtuner.v1.ops.others import Dropout
 from xtuner.v1.ops.act_fn import get_act_fn
 from xtuner.v1.utils import get_logger
+from xtuner.v1.module import AttnOutputs
 
 DEVICE = get_device()
 DEVICE_MODULE = get_torch_device_module()
@@ -102,7 +103,7 @@ class InternS1VisionAttention(nn.Module):
                                    dtype=torch.int32,
                                    device=hidden_states.device)
 
-        attn_output, extra_info = self.attn_impl_func(  # type: ignore
+        attn_op_outputs = self.attn_impl_func(
             query_states[None].transpose(1, 2),  # [b, n_head, seq, head_dim]
             key_states[None].transpose(1, 2),
             value_states[None].transpose(1, 2),
@@ -115,10 +116,15 @@ class InternS1VisionAttention(nn.Module):
             causal=False,
             deterministic=XTUNER_DETERMINISTIC
         )
-        attn_output = attn_output.reshape(batch_size, seq_len, self.embed_dim)
-        output = self.projection_layer(attn_output)
-        output = self.projection_dropout(output)
-        return output, extra_info
+        raw_output = attn_op_outputs["raw_output"]
+        raw_output = raw_output.reshape(batch_size, seq_len, self.embed_dim)
+        projected_output = self.projection_layer(raw_output)
+        projected_output = self.projection_dropout(projected_output)
+        attn_outputs: AttnOutputs = {
+            "projected_output": projected_output,
+            **attn_op_outputs,
+        }
+        return attn_outputs
 
 
 class InternS1VisionMLP(nn.Module):
