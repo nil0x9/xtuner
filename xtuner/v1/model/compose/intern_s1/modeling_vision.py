@@ -80,7 +80,9 @@ class InternS1VisionAttention(nn.Module):
         self.q_norm = RMSNorm(self.embed_dim) if qk_norm else nn.Identity()
         self.k_norm = RMSNorm(self.embed_dim) if qk_norm else nn.Identity()
 
-        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[config.attn_impl]
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = (
+            attn_impl_mapping[config.attn_impl]  # type: ignore[assignment]
+        )
 
     def forward(
             self,

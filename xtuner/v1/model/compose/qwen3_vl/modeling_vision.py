@@ -118,8 +118,10 @@ class Qwen3VLVisionAttention(nn.Module):
         self.scale = self.head_dim ** -0.5
         self.config = config
         self.attention_dropout = 0.0
-        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[attn_impl]
-    
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = (
+            attn_impl_mapping[config.attn_impl]  # type: ignore[assignment]
+        )
+
     def forward(
         self,
         hidden_states: torch.Tensor,

@@ -188,7 +188,7 @@ class MultiHeadAttention(nn.Module):
 
         self.apply_rotary_emb = get_apply_rotary_emb()  # type: ignore
 
-        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[attn_impl]
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[attn_impl]  # type: ignore[assignment]
 
     def prefilling(
         self,
