@@ -315,7 +315,7 @@ class Trainer:
         do_clip: bool = True,
         grad_norm_dtype: torch.dtype = torch.float32,
         trainer_cfg: TrainerConfig | None = None,
-        internal_metrics_cfg: InternalMetricsConfig | None = None
+        internal_metrics_cfg: InternalMetricsConfig | None = None,
     ):
         self._do_clip = do_clip
         self._grad_norm_dtype = grad_norm_dtype
@@ -624,8 +624,8 @@ class Trainer:
         self.logger.info(f"Training finished in {time.time() - train_begin:.2f} seconds")
 
     def _maybe_init_model_metrics_recorder(
-            self,
-            internal_metrics_cfg: InternalMetricsConfig | None,
+        self,
+        internal_metrics_cfg: InternalMetricsConfig | None,
     ) -> InternalMetricsRecorder | None:
         if internal_metrics_cfg and internal_metrics_cfg.internal_metrics_interval:
             self._internal_metrics_interval = internal_metrics_cfg.internal_metrics_interval

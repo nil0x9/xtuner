@@ -55,13 +55,13 @@ class InternalMetricsConfig(BaseModel):
     monitor_moe_router_logits_stats: bool | None = None  # only applies to MoE models
     monitor_moe_load_balance_stats: bool | None = None
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def post_init(self):
         monitoring_fields = [
             self.monitor_weights_rms_norm,
             self.monitor_attn_logits_stats,
             self.monitor_moe_router_logits_stats,
-            self.monitor_moe_load_balance_stats
+            self.monitor_moe_load_balance_stats,
         ]
 
         if all(field is False or field is None for field in monitoring_fields):
@@ -187,8 +187,10 @@ class InternalMetricsRecorder:
                         **additional_kwargs,
                     )
 
-                if self.internal_metrics_cfg.monitor_moe_load_balance_stats and \
-                        output.get("tokens_per_expert_global") is not None:
+                if (
+                    self.internal_metrics_cfg.monitor_moe_load_balance_stats
+                    and output.get("tokens_per_expert_global") is not None
+                ):
                     # At this point, tokens_per_expert_global is already all-reduced into current rank.
                     # [num_layers, num_experts]
                     if tokens_per_expert_global is None:
@@ -196,8 +198,10 @@ class InternalMetricsRecorder:
                     else:
                         tokens_per_expert_global += output["tokens_per_expert_global"].float()
 
-                if self.internal_metrics_cfg.monitor_moe_router_logits_stats and \
-                        output.get("router_logits") is not None:
+                if (
+                    self.internal_metrics_cfg.monitor_moe_router_logits_stats
+                    and output.get("router_logits") is not None
+                ):
                     for layer_name, router_logits in output["router_logits"].items():
                         # [bsz, packed_len, num_experts]
                         router_logits_max[layer_name].append(router_logits.max())
@@ -294,12 +298,14 @@ class InternalMetricsRecorder:
     @property
     def need_dummy_forward(self) -> bool:
         internal_metrics_cfg = self.internal_metrics_cfg
-        if internal_metrics_cfg.monitor_attn_logits_stats or internal_metrics_cfg.monitor_moe_router_logits_stats \
-                or internal_metrics_cfg.monitor_moe_load_balance_stats:
+        if (
+            internal_metrics_cfg.monitor_attn_logits_stats
+            or internal_metrics_cfg.monitor_moe_router_logits_stats
+            or internal_metrics_cfg.monitor_moe_load_balance_stats
+        ):
             return True
         else:
             return False
-
 
 
 def flatten_internal_metrics_for_logs(metrics: InternalMetrics, sep: str = "/") -> dict:

@@ -603,7 +603,7 @@ class MultiLatentAttention(nn.Module):
         assert key_states.size(0) == 1
         assert value_states.size(0) == 1
 
-        raw_output: torch.Tensor = None
+        raw_output: torch.Tensor
         softmax_lse: torch.Tensor | None = None
 
         fla_outputs = flash_attn_varlen_func(
@@ -668,7 +668,7 @@ class MultiLatentAttention(nn.Module):
         return cache_k, cache_v
 
     @overload  # type: ignore
-    def __call__(
+    def __call__(  # type: ignore
         self,
         hidden_states: torch.Tensor,
         position_embeddings: tuple[torch.Tensor, torch.Tensor],

@@ -1,7 +1,7 @@
 from functools import partial
 from torch import nn
 import torch
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 from typing_extensions import override
 import numpy as np
 
@@ -28,7 +28,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     fully_shard,
 )
-from xtuner.v1.ops.attn_imp import attn_impl_mapping
+from xtuner.v1.ops.attn_imp import attn_impl_mapping, AttnOpOutputs
 from xtuner.v1.model.utils.checkpointing import checkpoint_wrapper
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl
 from xtuner.v1.module import RMSNorm
@@ -80,7 +80,7 @@ class InternS1VisionAttention(nn.Module):
         self.q_norm = RMSNorm(self.embed_dim) if qk_norm else nn.Identity()
         self.k_norm = RMSNorm(self.embed_dim) if qk_norm else nn.Identity()
 
-        self.attn_impl_func = attn_impl_mapping[config.attn_impl]
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[config.attn_impl]
 
     def forward(
             self,

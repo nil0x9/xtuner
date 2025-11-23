@@ -1,11 +1,11 @@
-from typing import List
+from typing import List, Callable
 from xtuner.v1.ops.act_fn import get_act_fn
 import torch.nn as nn
 import torch
 from typing_extensions import override
 from .qwen3_vl_config import Qwen3VLVisionConfig
 from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_device, get_torch_device_module, init_params
-from xtuner.v1.ops.attn_imp import attn_impl_mapping
+from xtuner.v1.ops.attn_imp import attn_impl_mapping, AttnOpOutputs
 import torch.nn.functional as F
 from pathlib import Path
 from xtuner.v1.model import BaseModel
@@ -118,7 +118,7 @@ class Qwen3VLVisionAttention(nn.Module):
         self.scale = self.head_dim ** -0.5
         self.config = config
         self.attention_dropout = 0.0
-        self.attn_impl_func = attn_impl_mapping[config.attn_impl]
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[attn_impl]
     
     def forward(
         self,

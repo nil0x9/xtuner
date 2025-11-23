@@ -1,6 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Callable, Literal, cast
 
 import torch
 from cyclopts import Parameter
@@ -15,7 +15,7 @@ from xtuner.v1.config import GenerateConfig
 from xtuner.v1.data_proto import SequenceContext
 from xtuner.v1.float8.config import Float8Config
 from xtuner.v1.module.rope import RopeScalingConfig
-from xtuner.v1.ops import attn_impl_mapping, flash_attn_varlen_func, get_apply_rotary_emb
+from xtuner.v1.ops import AttnOpOutputs, attn_impl_mapping, flash_attn_varlen_func, get_apply_rotary_emb
 from xtuner.v1.ops.comm.all_to_all import ulysses_all_to_all
 from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_device, get_logger
 
@@ -188,7 +188,7 @@ class MultiHeadAttention(nn.Module):
 
         self.apply_rotary_emb = get_apply_rotary_emb()  # type: ignore
 
-        self.attn_impl_func = attn_impl_mapping[attn_impl]
+        self.attn_impl_func: Callable[..., AttnOpOutputs] = attn_impl_mapping[attn_impl]
 
     def prefilling(
         self,
@@ -441,7 +441,7 @@ class MultiHeadAttention(nn.Module):
         return cache_k, cache_v
 
     @overload  # type: ignore
-    def __call__(
+    def __call__(  # type: ignore
         self,
         hidden_states: torch.Tensor,
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
