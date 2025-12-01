@@ -2,24 +2,57 @@ set -ex
 
 # gpu_group=puyuvlm_gpu
 # namespace=ailab-puyuvlm
-# num_gpus=32
+# num_gpus=48
 # num_nodes=$((num_gpus / 8))
-# job_name=sft-internvl35-8b-tiny
-# config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny.py
+# # job_name=sft-internvl35-8b-tiny-old-cap
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_old_cap.py
+# # job_name=sft-internvl35-8b-tiny-new-cap
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_new_cap.py
+# # job_name=sft-internvl35-8b-tiny-old-new-mix-cap
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_old_new_mix_cap.py
+# # job_name=sft-internvl35-8b-tiny-old-old-mix-cap
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_old_old_mix_cap.py
+# job_name=cpt-internvl35-8b-tiny-old-caption-resume
+# config_file=examples/v1/internvl/cpt_internvl3.5_8B_config_tiny_caption.py
+
+# gpu_group=puyullmgpunew_gpu
+# namespace=ailab-puyullmgpunew
+# num_gpus=512
+# num_nodes=$((num_gpus / 8))
+# job_name=cpt-internvl35-8b-resume-try
+# config_file=examples/v1/internvl/cpt_internvl3.5_8B_config.py
+
+# gpu_group=puyuvlm_gpu
+# namespace=ailab-puyuvlm
+# num_gpus=96
+# num_nodes=$((num_gpus / 8))
+# job_name=cpt-internvl35-8b-tiny-based-mlp
+# config_file=examples/v1/internvl/cpt_internvl3.5_8B_config_tiny.py
+
+gpu_group=puyuvlm_gpu
+namespace=ailab-puyuvlm
+num_gpus=32
+num_nodes=$((num_gpus / 8))
+job_name=sft-internvl35-8b-tiny-llavaonevision-data5
+config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_llavaonevision.py
 
 # gpu_group=puyuvlm_gpu
 # namespace=ailab-puyuvlm
 # num_gpus=32
 # num_nodes=$((num_gpus / 8))
-# job_name=cpt-internvl35-8b-test
-# config_file=examples/v1/internvl/cpt_internvl3.5_8B_config.py
+# # job_name=sft-internvl35-8b-tiny-based-cpt-tiny-resume
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_based_cpt_tiny.py
+# # job_name=sft-internvl35-8b-tiny-based-cpt-tiny-caption1
+# # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_based_cpt_tiny_caption.py
+# job_name=sft-internvl35-8b-tiny-based-cpt-tiny-mlp-resume2
+# config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_based_cpt_tiny.py
 
-gpu_group=puyullmgpunew_gpu
-namespace=ailab-puyullmgpunew
-num_gpus=512
-num_nodes=$((num_gpus / 8))
-job_name=cpt-internvl35-8b
-config_file=examples/v1/internvl/cpt_internvl3.5_8B_config.py
+# gpu_group=puyuvlm_gpu
+# namespace=ailab-puyuvlm
+# num_gpus=32
+# num_nodes=$((num_gpus / 8))
+# job_name=mlp-internvl35-8b-resume
+# config_file=examples/v1/internvl/mlp_internvl3.5_8B_config_tiny.py
 
 rjob submit \
     --name=${job_name} \
@@ -33,6 +66,7 @@ rjob submit \
     --mount=gpfs://gpfs1/puyullmgpu-shared:/mnt/shared-storage-user/puyullmgpu-shared \
     --mount=gpfs://gpfs1/gaozhangwei:/mnt/shared-storage-user/gaozhangwei \
     --mount=gpfs://gpfs1/intern7shared:/mnt/shared-storage-user/intern7shared \
+    --mount=gpfs://gpfs1/chensitao:/mnt/shared-storage-user/chensitao \
     --host-network=true \
     --gang-start=true \
     --custom-resources rdma/mlnx_shared=8  \

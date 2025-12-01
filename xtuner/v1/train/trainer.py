@@ -1218,7 +1218,7 @@ class Trainer:
         self._dataloader.load_state_dict(dataloader_state)
 
     def _setup_env(self):
-        gc.disable()
+        # gc.disable()
         os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
         log_str = "\n============XTuner Training Environment============\n"
