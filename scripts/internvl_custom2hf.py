@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import shutil
+import time
 
 from collections import OrderedDict
 from safetensors import safe_open
@@ -9,76 +10,76 @@ from transformers import AutoConfig, AutoTokenizer, AutoModelForImageTextToText
 
 
 vit_300m_config = {
-"architectures": [
-    "InternVisionModel"
-],
-"attention_bias": True,
-"attention_dropout": 0.0,
-"dropout": 0.0,
-"hidden_act": "gelu",
-"hidden_dropout_prob": 0.0,
-"hidden_size": 1024,
-"image_size": [
-    448,
-    448
-],
-"initializer_factor": 0.1,
-"initializer_range": 1e-10,
-"intermediate_size": 4096,
-"layer_norm_eps": 1e-06,
-"layer_scale_init_value": 0.1,
-"model_type": "internvl_vision",
-"norm_type": "layer_norm",
-"num_attention_heads": 16,
-"num_channels": 3,
-"num_hidden_layers": 24,
-"patch_size": [
-    14,
-    14
-],
-"projection_dropout": 0.0,
-"torch_dtype": "bfloat16",
-"use_absolute_position_embeddings": True,
-"use_mask_token": False,
-"use_mean_pooling": True,
-"use_qk_norm": False
+    "architectures": [
+        "InternVisionModel"
+    ],
+    "attention_bias": True,
+    "attention_dropout": 0.0,
+    "dropout": 0.0,
+    "hidden_act": "gelu",
+    "hidden_dropout_prob": 0.0,
+    "hidden_size": 1024,
+    "image_size": [
+        448,
+        448
+    ],
+    "initializer_factor": 0.1,
+    "initializer_range": 1e-10,
+    "intermediate_size": 4096,
+    "layer_norm_eps": 1e-06,
+    "layer_scale_init_value": 0.1,
+    "model_type": "internvl_vision",
+    "norm_type": "layer_norm",
+    "num_attention_heads": 16,
+    "num_channels": 3,
+    "num_hidden_layers": 24,
+    "patch_size": [
+        14,
+        14
+    ],
+    "projection_dropout": 0.0,
+    "torch_dtype": "bfloat16",
+    "use_absolute_position_embeddings": True,
+    "use_mask_token": False,
+    "use_mean_pooling": True,
+    "use_qk_norm": False
 }
 
 
 vit_6b_config = {
-"architectures": [
-    "InternVisionModel"
-],
-"attention_bias": False,
-"attention_dropout": 0.0,
-"dropout": 0.0,
-"hidden_act": "gelu",
-"hidden_dropout_prob": 0.0,
-"hidden_size": 3200,
-"image_size": [
-    448,
-    448
-],
-"initializer_factor": 0.1,
-"initializer_range": 1e-10,
-"intermediate_size": 12800,
-"layer_norm_eps": 1e-06,
-"layer_scale_init_value": 0.1,
-"model_type": "internvl_vision",
-"norm_type": "rms_norm",
-"num_attention_heads": 25,
-"num_channels": 3,
-"num_hidden_layers": 45,
-"patch_size": [
-    14,
-    14
-],
-"projection_dropout": 0.0,
-"torch_dtype": "bfloat16",
-"use_absolute_position_embeddings": True,
-"use_mask_token": False,
-"use_mean_pooling": True,
-"use_qk_norm": True
+    "architectures": [
+        "InternVisionModel"
+    ],
+    "attention_bias": False,
+    "attention_dropout": 0.0,
+    "dropout": 0.0,
+    "hidden_act": "gelu",
+    "hidden_dropout_prob": 0.0,
+    "hidden_size": 3200,
+    "image_size": [
+        448,
+        448
+    ],
+    "initializer_factor": 0.1,
+    "initializer_range": 1e-10,
+    "intermediate_size": 12800,
+    "layer_norm_eps": 1e-06,
+    "layer_scale_init_value": 0.1,
+    "model_type": "internvl_vision",
+    "norm_type": "rms_norm",
+    "num_attention_heads": 25,
+    "num_channels": 3,
+    "num_hidden_layers": 45,
+    "patch_size": [
+        14,
+        14
+    ],
+    "projection_dropout": 0.0,
+    "torch_dtype": "bfloat16",
+    "use_absolute_position_embeddings": True,
+    "use_mask_token": False,
+    "use_mean_pooling": True,
+    "use_qk_norm": True
 }
 
 
@@ -213,8 +214,11 @@ if __name__ == "__main__":
     #     f"{os.path.basename(mllm_custom_path)}-HF",
     # )
     
-    mllm_custom_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xpuyu/work_dir/InternVL3-8B-Qwen3-cpt-science-data-slow-tokenize-data-0628-tokenizer-rjob-h200/20250703154422/hf-30000"
-    mllm_save_path = "/mnt/shared-storage-user/intern7shared/wangweiyun/OpenGVLab-rc1-hf/InternVL3_5-8B-CPT-HF"
+    # mllm_custom_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xpuyu/work_dir/InternVL3-8B-Qwen3-cpt-science-data-slow-tokenize-data-0628-tokenizer-rjob-h200/20250703154422/hf-30000"
+    # mllm_save_path = "/mnt/shared-storage-user/intern7shared/wangweiyun/OpenGVLab-rc1-hf/InternVL3_5-8B-CPT-HF"
+    
+    mllm_custom_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/checkpoints/InternVL3-30B-A3B-Qwen3MoE"
+    mllm_save_path = "/mnt/shared-storage-user/intern7shared/wangweiyun/OpenGVLab-rc1-hf/InternVL3_5-30B-A3B-INIT-HF"
 
     print(f"{mllm_custom_path=}")
     print(f"{mllm_save_path=}")
@@ -234,9 +238,11 @@ if __name__ == "__main__":
 
     convert_chat_config_to_hf(chat_config_path, hf_config_path, vit_config)
 
+    start_time = time.time()
     config = AutoConfig.from_pretrained(mllm_save_path, trust_remote_code=True)
     model = AutoModelForImageTextToText.from_config(config, trust_remote_code=True)
-
+    end_time = time.time()
+    print(f"模型加载完成，耗时 {end_time - start_time} 秒")
     print(f"模型已加载到 GPU，并使用转换后的 HF config: {hf_config_path}")
 
     # 加载 HF safetensors 权重
@@ -285,3 +291,4 @@ if __name__ == "__main__":
             if os.path.exists(src_file):
                 shutil.copy(src_file, mllm_save_path)
                 print(f"✅ 复制文件 {file_name} 到 {mllm_save_path}")
+                

@@ -120,7 +120,7 @@ class InternVL3P5Dense8BConfig(InternVLBaseConfig):
 
 class InternVL3P5MoE30BA3Config(InternVLBaseConfig):
     vision_config: InternVLVisionConfig = InternVLVisionConfig()
-    projector_config: InternVLProjectorConfig = InternVLProjectorConfig(text_hidden_size=2049)
+    projector_config: InternVLProjectorConfig = InternVLProjectorConfig(text_hidden_size=2048)
     text_config: Qwen3MoE30BA3Config = Qwen3MoE30BA3Config()
 
     @property
