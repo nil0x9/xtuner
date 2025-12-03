@@ -248,13 +248,13 @@ def main():
         )
         dataset_config = [
             {
-                "dataset": DatasetConfig(name="alpaca", anno_path=ALPACA_PATH, sample_ratio=100),
+                "dataset": DatasetConfig(name="alpaca", anno_path=ALPACA_PATH, sample_ratio=1000),
                 "tokenize_fn": FTDPTokenizeFnConfig(max_length=4096),
             },
         ]
 
         dataloader_config = DataloaderConfig(
-            pack_max_length=65536,
+            pack_max_length=32*1024,
             num_workers=8,
         )
         work_dir = f"{args.work_dir}-{name}"
@@ -270,7 +270,7 @@ def main():
             loss_cfg=loss_cfg,
             lr_cfg=lr_cfg,
             tokenizer_path=QWEN3_MOE_PATH,
-            global_batch_size=256,
+            global_batch_size=512,
             work_dir=work_dir,
             seed=0,
             total_epoch=10,
