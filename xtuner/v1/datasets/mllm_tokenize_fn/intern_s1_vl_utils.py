@@ -213,7 +213,7 @@ def read_interns1_vl_video(
     oss_read_time = 0
     vlen = 0
     video_get_batch_time = 0
-    if Path(path).is_dir():
+    if path.endswith("/"):
         frames, oss_read_time, vlen = read_frames_folder(
             path,
             num_frames=max_num_frames,

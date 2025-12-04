@@ -14,12 +14,26 @@ import json
 import os
 import shutil
 
+# # 路径配置
+# ceph_config = "/mnt/shared-storage-user/gaozhangwei/workspace_glx/petreloss.conf"
+# meta_data_path = '/mnt/shared-storage-user/gaozhangwei/workspace_glx/data/export_meta_internvl3_5_tiny.json'
+# model_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-cpt-tiny-bs96-epoch1-lr1e-5/20251109154412/hf-5697" # 转换后的权重（hf官方格式）
+# work_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-sft-based-3.5tiny-data-and-cpt-tiny-bs32-epoch1-lr2e-5"
+# tokenizer_cache_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_tokenizer_cache/internvl3.5/slow_tokenize_sft_ml_32k_tokenizer"
+
+# # 路径配置
+# ceph_config = "/mnt/shared-storage-user/gaozhangwei/workspace_glx/petreloss.conf"
+# meta_data_path = '/mnt/shared-storage-user/gaozhangwei/workspace_glx/data/export_meta_internvl3_5_tiny.json'
+# model_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-cpt-tiny-bs96-epoch1-lr1e-5/20251109154412/hf-5697" # 转换后的权重（hf官方格式）
+# work_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5-test/internvl3.5-8B-sft-based-3.5tiny-data-and-cpt-tiny-bs32-epoch1-lr2e-5"
+# tokenizer_cache_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_tokenizer_cache/internvl3.5-test/slow_tokenize_sft_ml_32k_tokenizer"
+
 # 路径配置
 ceph_config = "/mnt/shared-storage-user/gaozhangwei/workspace_glx/petreloss.conf"
-meta_data_path = '/mnt/shared-storage-user/gaozhangwei/workspace_glx/data/export_meta_internvl3_5_tiny.json'
+meta_data_path = '/mnt/shared-storage-user/gaozhangwei/workspace_glx/data/export_meta_internvl3_5_tiny_v2.json'
 model_path = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-cpt-tiny-bs96-epoch1-lr1e-5/20251109154412/hf-5697" # 转换后的权重（hf官方格式）
-work_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5/internvl3.5-8B-sft-based-3.5tiny-data-and-cpt-tiny-bs32-epoch1-lr2e-5"
-tokenizer_cache_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_tokenizer_cache/internvl3.5/slow_tokenize_sft_ml_32k_tokenizer"
+work_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_saved_model/internvl3.5_v2/internvl3.5-8B-sft-based-3.5tiny-data-and-cpt-tiny-bs32-epoch1-lr2e-5"
+tokenizer_cache_dir = "/mnt/shared-storage-user/intern7shared/internvl_a4s/xtuner_tokenizer_cache/internvl3.5_v2/slow_tokenize_sft_ml_32k_tokenizer"
 
 # 将当前配置文件拷贝到work_dir
 if not os.path.exists(work_dir):
@@ -92,7 +106,7 @@ dataloader_config = DataloaderConfig(
 # optimizer and lr config
 optim_cfg = AdamWConfig(lr=lr, weight_decay=weight_decay, foreach=False)
 lr_cfg = LRConfig(lr_type="cosine", warmup_ratio=warmup_ratio, lr_min=lr_min)
-fsdp_cfg = FSDPConfig(sp_size=1, recompute_ratio=recompute_ratio, torch_compile=True,
+fsdp_cfg = FSDPConfig(recompute_ratio=recompute_ratio, torch_compile=True,
                       checkpoint_preserve_rng_state=False)
 
 resume_cfg = ResumeConfig(auto_resume=True)

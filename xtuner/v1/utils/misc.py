@@ -121,7 +121,7 @@ def is_hf_model_path(path: str | Path) -> bool:
     except KeyboardInterrupt as e:
         raise e
     except Exception as e:
-        logger.debug(f"Model path {path} is not a valid HuggingFace model path. Error: {e}")
+        logger.info(f"Model path {path} is not a valid HuggingFace model path. Error: {e}")
         return False
     else:
         return True

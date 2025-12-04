@@ -36,6 +36,7 @@ def replace_video_token(
     messages: ChatMessages, chat_template: HybridChatTemplate, num_image_token_list: list[list[int]]
 ):
     current_image_idx = 0
+    current_video_idx = 0
     n_video = len(num_image_token_list)
     n_image = sum([len(num_image_token_list[i]) for i in range(n_video)])
     for msg in messages.messages:
@@ -49,7 +50,6 @@ def replace_video_token(
                         text = c.text
                         text = text.replace("<VIDEO_CONTEXT>", IMAGE_TOKEN_ALIAS)
                         video_cnt = text.count(IMAGE_TOKEN_ALIAS)
-                        assert video_cnt == n_video, f"video_cnt: {video_cnt} != n_video: {n_video}"
 
                         for i in range(video_cnt):
                             # 每一帧的 image_token 应该是完全一样，因此直接 num_image_token_list[i][0] 就行
@@ -62,8 +62,10 @@ def replace_video_token(
                             )
                             text = text.replace(IMAGE_TOKEN_ALIAS, special_tokens, 1)
                             current_image_idx += len(num_image_token_list[i])
+                            current_video_idx += 1
                         c.text = text
     assert current_image_idx == n_image, f"VIDEO ERROR: total_image_idx: {current_image_idx} != {n_image}"
+    assert current_video_idx == n_video, f"VIDEO ERROR: total_video_idx: {current_video_idx} != {n_video}"
 
 
 class InternS1VLTokenizeFunction(BaseMLLMTokenizeFunction[InternS1DataItem]):
