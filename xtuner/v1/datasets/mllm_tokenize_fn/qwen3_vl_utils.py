@@ -159,7 +159,7 @@ def read_qwen3_vl_video(
 ):
     start_time = time.time()
     video_get_batch_time = 0
-    if Path(path).is_dir():
+    if path.endswith("/"):
         frames, oss_read_time, vlen, frame_indices, timestamps = read_frames_folder(
             path, frames_indices, timestamps, client=client
         )

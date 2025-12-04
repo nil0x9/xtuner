@@ -62,12 +62,14 @@ gpu_group=puyuvlm_gpu
 namespace=ailab-puyuvlm
 num_gpus=8
 num_nodes=$((num_gpus / 8))
-job_name=cpt-tiny-v2
-config_file=examples/v1/internvl/cpt_internvl3.5_8B_config_tiny.py
+# job_name=cpt-tiny-v2
+# config_file=examples/v1/internvl/cpt_internvl3.5_8B_config_tiny.py
 # job_name=sft-tiny-v2
 # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_based_cpt_tiny.py
-# job_name=qwen3vl-8b-cpt-tiny
-# config_file=examples/v1/qwenvl/cpt_qwen3vl_8B_config_tiny.py
+job_name=qwen3vl-8b-cpt-tiny
+config_file=examples/v1/qwenvl/cpt_qwen3vl_8B_config_tiny.py
+# job_name=sft-qwen3vl-8b-tiny-based-cpt-tiny
+# config_file=examples/v1/qwenvl/sft_qwen3vl_8B_config_tiny_based_cpt_tiny.py
 
 rjob submit \
     --name=${job_name} \
