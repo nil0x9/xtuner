@@ -17,7 +17,9 @@ rlaunch --gpu=8 --memory=1600000 --cpu=128 \
     --mount=gpfs://gpfs1/gaozhangwei:/mnt/shared-storage-user/gaozhangwei \
     --mount=gpfs://gpfs1/songdemin:/mnt/shared-storage-user/songdemin \
     --mount=gpfs://gpfs1/chensitao:/mnt/shared-storage-user/chensitao \
+    --mount=gpfs://gpfs1/large-model-center-share-weights:/mnt/shared-storage-user/large-model-center-share-weights \
     -- bash -c "
+        pip install transformers==4.57.0 -i http://mirrors.i.h.pjlab.org.cn/pypi/simple/ --trusted-host mirrors.i.h.pjlab.org.cn
         pip install decord boto3 -i http://mirrors.i.h.pjlab.org.cn/pypi/simple/ --trusted-host mirrors.i.h.pjlab.org.cn
         pip install /mnt/shared-storage-user/gaozhangwei/workspace_glx/petrel-oss-sdk-2.3.24.tar.gz -i http://mirrors.i.h.pjlab.org.cn/pypi/simple/ --trusted-host mirrors.i.h.pjlab.org.cn
         cd /mnt/shared-storage-user/gaozhangwei/workspace_glx/xtuner

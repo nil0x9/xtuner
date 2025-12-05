@@ -66,10 +66,12 @@ num_nodes=$((num_gpus / 8))
 # config_file=examples/v1/internvl/cpt_internvl3.5_8B_config_tiny.py
 # job_name=sft-tiny-v2
 # config_file=examples/v1/internvl/sft_internvl3.5_8B_config_tiny_based_cpt_tiny.py
-job_name=qwen3vl-8b-cpt-tiny
-config_file=examples/v1/qwenvl/cpt_qwen3vl_8B_config_tiny.py
+# job_name=qwen3vl-8b-cpt-tiny
+# config_file=examples/v1/qwenvl/cpt_qwen3vl_8B_config_tiny.py
 # job_name=sft-qwen3vl-8b-tiny-based-cpt-tiny
 # config_file=examples/v1/qwenvl/sft_qwen3vl_8B_config_tiny_based_cpt_tiny.py
+job_name=qwen3vl-30b-a3b-cpt-tiny-2
+config_file=examples/v1/qwenvl/cpt_qwen3vl_30B_A3B_config_tiny.py
 
 rjob submit \
     --name=${job_name} \
@@ -84,6 +86,7 @@ rjob submit \
     --mount=gpfs://gpfs1/gaozhangwei:/mnt/shared-storage-user/gaozhangwei \
     --mount=gpfs://gpfs1/intern7shared:/mnt/shared-storage-user/intern7shared \
     --mount=gpfs://gpfs1/chensitao:/mnt/shared-storage-user/chensitao \
+    --mount=gpfs://gpfs1/large-model-center-share-weights:/mnt/shared-storage-user/large-model-center-share-weights \
     --host-network=true \
     --gang-start=true \
     --custom-resources rdma/mlnx_shared=8  \
