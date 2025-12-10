@@ -38,7 +38,7 @@ from xtuner.v1.model.base import ModelItem, TransformerConfig, XTunerBaseModelCo
 from xtuner.v1.model.compose.base import BaseComposeConfig
 from xtuner.v1.model.moe.moe import MoEConfig
 from xtuner.v1.model.utils import ModelForwardExtraLogInfo
-from xtuner.v1.patch import patch_default_save_plan
+from xtuner.v1.patch import patch_default_save_plan, patch_dcp_save_state_dict
 from xtuner.v1.profiler import profiling_memory, profiling_time
 from xtuner.v1.profiler.prober import ProberList
 from xtuner.v1.profiler.prober_utils import setup_prober_list
@@ -327,6 +327,7 @@ class TrainerConfig(BaseModel):
     checkpoint_interval: int | None = -1
     checkpoint_maxkeep: int | None = -1
     skip_checkpoint_validation: bool = False  # Suggest enabled if fsdp_size is larger than 512
+    patch_for_dcp_finish: bool = False
     snapshot_interval: int | None = None
     check_health_interval: int | None = None
     hf_interval: int | None = None
@@ -449,6 +450,7 @@ class Trainer:
         checkpoint_interval: int | None = -1,
         checkpoint_maxkeep: int | None = -1,
         skip_checkpoint_validation: bool = False,  # Suggest enabled if fsdp_size is larger than 512
+        patch_for_dcp_finish: bool = False,
         snapshot_interval: int | None = None,
         check_health_interval: int | None = None,
         hf_interval: int | None = None,
@@ -483,6 +485,9 @@ class Trainer:
         self._micro_batch_size: int | None = None
         if skip_checkpoint_validation:
             patch_default_save_plan()
+
+        if patch_for_dcp_finish:
+            patch_dcp_save_state_dict()
 
         if isinstance(profile_step, int):
             profile_step = [profile_step]
@@ -667,6 +672,7 @@ class Trainer:
             checkpoint_interval=config.checkpoint_interval,
             checkpoint_maxkeep=config.checkpoint_maxkeep,
             skip_checkpoint_validation=config.skip_checkpoint_validation,
+            patch_for_dcp_finish=config.patch_for_dcp_finish,
             snapshot_interval=config.snapshot_interval,
             check_health_interval=config.check_health_interval,
             hf_interval=config.hf_interval,
