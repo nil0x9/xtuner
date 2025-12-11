@@ -13,26 +13,31 @@ from mmengine import load
 from mmengine.dist import get_rank
 from mmengine.runner import set_random_seed
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
-from ray.actor import ActorClass
 from typing_extensions import Self
 
 from transformers import AutoTokenizer, PreTrainedTokenizer, PreTrainedTokenizerFast
-from xtuner.v1.data_proto.rl_data import check_dataflow_item
+from xtuner.v1.data_proto.rl_data import is_valid_for_training
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.ray.base import AcceleratorResourcesConfig, AutoAcceleratorWorkers
 from xtuner.v1.ray.config.worker import RolloutConfig
-from xtuner.v1.ray.dataflow import DataFlow, DataFlowConfig, ReplayBufferConfig
-from xtuner.v1.ray.environment import SingleTurnEnvironment
+from xtuner.v1.ray.dataflow import DataFlow, DataFlowConfig, DataFlowProxy, ReplayBufferConfig
+from xtuner.v1.ray.environment import SingleTurnEnvironment, SingleTurnEnvironmentProxy
 from xtuner.v1.ray.evaluator import Evaluator, EvaluatorConfig
 from xtuner.v1.ray.judger import JudgerConfig
-from xtuner.v1.rl.base import TrainingController, WorkerConfig
+from xtuner.v1.rl.base import (
+    TrainingController,
+    TrainingControllerProxy,
+    TrainingWorkerClass,
+    TrainingWorkerProxy,
+    WorkerConfig,
+)
 from xtuner.v1.rl.base import TrainingWorker as BaseTrainingWorker
 from xtuner.v1.train import ResumeConfig
 from xtuner.v1.utils import XTUNER_DETERMINISTIC, get_logger, is_hf_model_path, record_git_info, timer, timer_logger
 from xtuner.v1.utils.device import get_device, get_torch_device_module
 from xtuner.v1.utils.env_check import get_rollout_engine_version
 
-from .trainer import ExpHistory, ExpInfo, GitInfo, XTunerMeta
+from .trainer import ExpHistory, ExpInfo, GitInfo, LoadCheckpointConfig, XTunerMeta
 
 
 # TODO: Move DEVICE to `xtuner.utils.device`
@@ -65,6 +70,8 @@ class RLTrainerConfig(BaseModel):
     log_dir: Path | str | None = None
     total_epochs: int
     resume_config: ResumeConfig | None = None
+    auto_resume: bool = False
+    load_checkpoint_cfg: LoadCheckpointConfig = LoadCheckpointConfig()
     strict_load: bool = True
     hf_interval: int | None = None
     hf_max_keep: int | None = None
@@ -157,6 +164,8 @@ class RLTrainer:
         enable_evaluate (bool): Whether to perform periodic evaluation during training.
         resume_config (ResumeConfig | None): Configuration for resuming training from
             a previous checkpoint. Defaults to None.
+        auto_resume (bool): Whether to automatically resume training. Defaults to False.
+        load_checkpoint_cfg (LoadCheckpointConfig): Configuration for loading checkpoints.
         strict_load (bool): Whether to strictly enforce checkpoint loading compatibility.
             Defaults to True.
         hf_interval (int | None): Interval (in epochs) for saving HuggingFace format
@@ -203,7 +212,9 @@ class RLTrainer:
         work_dir: Path | str | None = None,
         log_dir: Path | str | None = None,
         total_epochs: int,
-        resume_config: ResumeConfig | None = None,
+        resume_config: ResumeConfig | None = None,  # TODO: Removed in version 1.1.0
+        auto_resume: bool = False,
+        load_checkpoint_cfg: LoadCheckpointConfig = LoadCheckpointConfig(),
         strict_load: bool = True,
         hf_interval: int | None = None,
         hf_max_keep: int | None = None,
@@ -228,14 +239,12 @@ class RLTrainer:
 
         self._rl_trainer_cfg = trainer_cfg
         self._load_from = Path(load_from) if isinstance(load_from, str) else load_from
-        self._load_from_hf = load_from is not None and is_hf_model_path(load_from)
-        if not self._load_from_hf:
-            raise NotImplementedError
+
+        is_hf_path, error_info = is_hf_model_path(load_from) if load_from is not None else False, ""
+        self._load_from_hf = is_hf_path
 
         if not self._load_from_hf:
-            assert hf_interval is None and hf_max_keep is None, (
-                "`hf_interval` and `hf_max_keep` should be None when `load_from` is not a Huggingface model path, "
-            )
+            raise NotImplementedError(error_info)
 
         self._hf_max_keep = hf_max_keep
         self._hf_interval = hf_interval
@@ -257,7 +266,8 @@ class RLTrainer:
             work_dir.mkdir(parents=True, exist_ok=True)
 
         self._work_dir = work_dir
-        self._meta = self._init_xtuner_meta(work_dir, resume_config is not None)
+        auto_resume = auto_resume or (resume_config is not None and resume_config.auto_resume)
+        self._meta = self._init_xtuner_meta(work_dir, auto_resume)
 
         if log_dir is None:
             log_dir = self.exp_dir
@@ -265,6 +275,11 @@ class RLTrainer:
             log_dir = Path(log_dir)
 
         self.logger = self._init_logger(log_dir)
+
+        self.logger.warning(
+            "`resume_config` is deprecated, please use `auto_resume` and `load_checkpoint_cfg` instead"
+        )
+
         train_worker_cfg.log_dir = log_dir
         dataflow_config.worker_log_dir = log_dir
         rollout_config.worker_log_dir = log_dir
@@ -298,7 +313,18 @@ class RLTrainer:
             * total_epochs
         )
         bind_train_rollout(train_controller=self._train_controller, env_controller=self._rollout_env_controller)
-        ray.get(self._train_controller.offload.remote(target="all"))
+        # update weights if rollout_config.skip_load_weights == True
+        if rollout_config.skip_load_weights:
+            self.logger.info("Rollout workers skip load weights, update weights from train workers.")
+            ray.get(self._train_controller.offload.remote(target="optimizer"))
+            ray.get(self._rollout_env_controller.offload.remote())
+            ray.get(self._rollout_env_controller.onload_weights.remote())
+            ray.get(self._train_controller.update_weights.remote())
+            ray.get(self._train_controller.offload.remote(target="model"))
+            ray.get(self._rollout_env_controller.onload_kvcache.remote())
+            self.logger.info("Rollout workers has updated weights from train workers.")
+        else:
+            ray.get(self._train_controller.offload.remote(target="all"))
 
         self._train_worker_cfg = train_worker_cfg
 
@@ -338,6 +364,8 @@ class RLTrainer:
             log_dir=config.log_dir,
             total_epochs=config.total_epochs,
             resume_config=config.resume_config,
+            auto_resume=config.auto_resume,
+            load_checkpoint_cfg=config.load_checkpoint_cfg,
             strict_load=config.strict_load,
             hf_interval=config.hf_interval,
             hf_max_keep=config.hf_max_keep,
@@ -353,27 +381,28 @@ class RLTrainer:
         rollout_cfg: RolloutConfig,
         judger_cfg: JudgerConfig,
         replay_buffer_config: ReplayBufferConfig,
-    ):
-        env = cast(ActorClass, SingleTurnEnvironment).remote("grpo", self._pg, rollout_cfg, self._pg, judger_cfg)
-        flow = cast(ActorClass, DataFlow).remote("grpo", dataflow_cfg, replay_buffer_config, env)
+    ) -> tuple[SingleTurnEnvironmentProxy, DataFlowProxy]:
+        env = SingleTurnEnvironment.remote("grpo", self._pg, rollout_cfg, self._pg, judger_cfg)
+        flow = DataFlow.remote("grpo", dataflow_cfg, replay_buffer_config, env)
         return env, flow
 
-    def _build_train_controller(self, train_worker_cfg: WorkerConfig):
-        TrainingWorker = ray.remote(
-            runtime_env={
-                "env_vars": {
-                    "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES": "1",
-                    "RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES": "1",
-                    "HCCL_NPU_SOCKET_PORT_RANGE": "auto",
-                }
-            },
-        )(BaseTrainingWorker)
-        train_workers, _ = AutoAcceleratorWorkers.from_placement_group(TrainingWorker, train_worker_cfg, self._pg)
-        ray.get([worker.__ray_ready__.remote() for worker in train_workers])
-        train_controller = cast(ActorClass, TrainingController).remote(
-            workers=train_workers,
+    def _build_train_controller(self, train_worker_cfg: WorkerConfig) -> TrainingControllerProxy:
+        TrainingWorker = cast(
+            TrainingWorkerClass,
+            ray.remote(
+                runtime_env={
+                    "env_vars": {
+                        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES": "1",
+                        "RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES": "1",
+                        "HCCL_NPU_SOCKET_PORT_RANGE": "auto",
+                    }
+                },
+            )(BaseTrainingWorker),
         )
-        ray.get(train_controller.__ray_ready__.remote())
+        train_workers: list[TrainingWorkerProxy]
+        train_workers, _ = AutoAcceleratorWorkers.from_placement_group(TrainingWorker, train_worker_cfg, self._pg)
+        ray.wait([worker.ready.remote() for worker in train_workers])
+        train_controller = TrainingController.remote(workers=train_workers)
         return train_controller
 
     def fit(self):
@@ -385,7 +414,7 @@ class RLTrainer:
         """
         self.logger.info("Start RL training")
         if self._enable_initial_evaluate and self._enable_evaluate and self._evaluator:
-            ray.get(self._rollout_env_controller.check_active_workers.remote())
+            ray.get(self._rollout_env_controller.update_active_workers.remote())
             scores, eval_data_groups = ray.get(self._evaluator.run.remote(return_samples=True))
             trajectory_save_path = self.exp_dir / "eval_0_trajectory.jsonl"
             self._save_trajectories(eval_data_groups, trajectory_save_path)
@@ -395,7 +424,7 @@ class RLTrainer:
             step_timer_dict = {}
             # 1. Rollout
             with timer("generation", step_timer_dict):
-                ray.get(self._rollout_env_controller.check_active_workers.remote())
+                ray.get(self._rollout_env_controller.update_active_workers.remote())
                 data_groups, multimodal_train_infos = ray.get(self._rollout_dataflow.run.remote())
             # 2. Offload rollout models and save trajectories
             with timer("offload_and_dump", step_timer_dict):
@@ -475,7 +504,7 @@ class RLTrainer:
             is_multimodal = True
 
         for j, group in enumerate(data_groups):
-            if not check_dataflow_item(group):
+            if not is_valid_for_training(group):
                 self.logger.error(f"Skip one data group {group} due to rollout failed or empty response.")
                 continue
             if is_multimodal:
@@ -566,7 +595,7 @@ class RLTrainer:
         # mismatch_token_ids_count = 0
         # response_len_list = []
         for group in data_groups:
-            if not check_dataflow_item(group):
+            if not is_valid_for_training(group):
                 self.logger.error(f"Skip one data group {group} due to rollout failed or empty response.")
                 continue
             for data in group:
@@ -618,6 +647,7 @@ class RLTrainer:
                         "response_len": rollout_response_len_list[_count],
                         "label": data.data.reward_model["ground_truth"],
                         "reward": data.env.judger.reward["score"],
+                        "finish_reason": data.env.rollout.finish_reason,
                     }
                     json.dump(item, f, ensure_ascii=False, indent=2)
                     f.write("\n")

@@ -5,6 +5,7 @@ from typing import Any, List
 import ray
 
 from xtuner.v1.data_proto.rl_data import RLDataFlowItem
+from xtuner.v1.utils import ray_method
 
 
 class BaseEnvironment(ABC):
@@ -99,6 +100,7 @@ class BaseEnvironment(ABC):
         return judger_controller
 
     @abstractmethod
+    @ray_method
     async def generate(
         self, data: List[RLDataFlowItem], sample_params: Any, extra_params: Any
     ) -> List[RLDataFlowItem]:
@@ -116,6 +118,7 @@ class BaseEnvironment(ABC):
         pass
 
     @abstractmethod
+    @ray_method
     async def run(self, data: List[RLDataFlowItem], sample_params: Any, extra_params: Any) -> List[RLDataFlowItem]:
         """Executes a full cycle of generation and interpretation, such as
         generating a response and then evaluating it with a judger. This method
@@ -149,7 +152,8 @@ class BaseEnvironment(ABC):
             return ray.get(getattr(self.rollout_controller, method_name).remote())
         return getattr(self.rollout_controller, method_name).remote()
 
-    def pause(self, block=True):
+    @ray_method
+    def pause(self, block=True) -> None:
         """Pauses the rollout workers.
 
         Args:
@@ -157,7 +161,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("pause", block)
 
-    def shutdown(self, block=True):
+    @ray_method
+    def shutdown(self, block=True) -> None:
         """Shuts down the rollout workers.
 
         Args:
@@ -165,7 +170,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("shutdown", block)
 
-    def restart(self, block=True):
+    @ray_method
+    def restart(self, block=True) -> None:
         """Restarts the rollout workers.
 
         Args:
@@ -173,7 +179,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("restart", block)
 
-    def get_rollout_info(self, block=True):
+    @ray_method
+    def get_rollout_info(self, block=True) -> dict[str, Any]:
         """Gets information about the rollout workers.
 
         Args:
@@ -181,7 +188,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("get_rollout_info", block)
 
-    def onload_weights(self, block=True):
+    @ray_method
+    def onload_weights(self, block=True) -> None:
         """Loads weights onto the rollout workers.
 
         Args:
@@ -189,7 +197,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("onload_weights", block)
 
-    def onload_kvcache(self, block=True):
+    @ray_method
+    def onload_kvcache(self, block=True) -> str:
         """Loads the KV cache onto the rollout workers.
 
         Args:
@@ -197,7 +206,8 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("onload_kvcache", block)
 
-    def offload(self, block=True):
+    @ray_method
+    def offload(self, block=True) -> str:
         """Offloads weights and the KV cache from the rollout workers.
 
         Args:
@@ -205,10 +215,20 @@ class BaseEnvironment(ABC):
         """
         return self._call_rollout_func("offload", block)
 
-    def check_active_workers(self, block=True):
+    @ray_method
+    def update_active_workers(self, block=True) -> None:
         """Checks the status of active rollout workers.
 
         Args:
             block (bool): Whether to block until the operation completes.
         """
-        return self._call_rollout_func("check_active_workers", block)
+        return self._call_rollout_func("update_active_workers", block)
+
+    @ray_method
+    def get_rollout_stats(self, block=True) -> dict[str, Any]:
+        """Gets statistics from the rollout workers.
+
+        Args:
+            block (bool): Whether to block until the operation completes.
+        """
+        return self._call_rollout_func("get_rollout_stats", block)

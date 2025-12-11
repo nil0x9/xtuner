@@ -54,6 +54,7 @@ class OtherLog(TypedDict):
     __pydantic_config__ = ConfigDict(arbitrary_types_allowed=True)  # type: ignore[misc]
     maxvio: NotRequired[float]
     consumed_tokens: float
+    consumed_img_tokens: NotRequired[float]
     extra_info: ModelForwardExtraLogInfo
     efficient_attn_ratio: float
 
@@ -95,7 +96,7 @@ class HFCheckpointLoader:
             self.use_safetensors = False
         elif "model.safetensors" in os.listdir(self.model_path):
             with safe_open(os.path.join(self.model_path, "model.safetensors"), framework="pt") as f:
-                self.weight_map = {k: "model.safetensors" for k in f.keys()}
+                self.weight_map = dict.fromkeys(f.keys(), "model.safetensors")
             self.use_safetensors = True
         else:
             raise FileNotFoundError

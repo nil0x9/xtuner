@@ -3,9 +3,11 @@ from typing import Literal, TypedDict
 
 import ray
 import torch
+from ray.actor import ActorProxy
 
 from xtuner.v1.data_proto.sequence_context import SequenceContext
 from xtuner.v1.engine.vision_compose_train_engine import VisionComposeConfigProtocol
+from xtuner.v1.utils import ray_method
 
 from .worker import TrainingWorker
 
@@ -17,8 +19,7 @@ class ColateItem(TypedDict):
     rollout_logprobs: torch.Tensor | None
 
 
-@ray.remote
-class TrainingController:
+class RawTrainingController:
     def __init__(self, workers: list[TrainingWorker]) -> None:
         self.workers = workers
 
@@ -78,8 +79,6 @@ class TrainingController:
             assert language_cfg is not None
             has_rollout_routed_experts = True
             n_routed_experts = language_cfg.n_routed_experts
-            num_experts_per_tok = language_cfg.num_experts_per_tok
-            num_hidden_layers = language_cfg.num_hidden_layers
 
         for pack_info in pack_infos:
             indices = pack_info["indices"]
@@ -119,10 +118,8 @@ class TrainingController:
                     pad_seq_ctx.position_ids = torch.cat(_position_ids_list, dim=-1)
 
                 if has_rollout_routed_experts:
-                    pad_rand_index = torch.randint(
-                        low=0, high=n_routed_experts, size=(pad_len, num_hidden_layers, num_experts_per_tok)
-                    )
-                    pad_seq_ctx.rollout_routed_experts = ray.put(pad_rand_index)
+                    pad_rand_index = torch.randint(low=0, high=n_routed_experts, size=(pad_len, 1, 1))
+                    pad_seq_ctx.rollout_routed_experts = pad_rand_index
 
                 seq_ctx_list.append(pad_seq_ctx)
                 label_list.append(pad_labels)
@@ -166,6 +163,7 @@ class TrainingController:
         # 排序后这条 pack 会被放在最前面，导致 rank0 的第一个 step 消耗的有效 token 数往往少于其他 rank，是正常现象。
         return sorted(packed_data_batches, key=lambda x: x["seq_ctx"].max_length_q, reverse=True)
 
+    @ray_method
     def fit(self, data_batches: list[ColateItem], pack_max_length: int, rollout_idx: int):
         has_rollout_routed_experts = False
         language_cfg = None
@@ -259,6 +257,7 @@ class TrainingController:
             )
         ray.get(handles)
 
+    @ray_method
     def offload(self, target: Literal["model", "optimizer", "all"] = "all"):
         if target == "model":
             ray.get([worker.offload_model.remote() for worker in self.workers])  # type: ignore
@@ -269,6 +268,7 @@ class TrainingController:
             ray.get([worker.offload_optimizer.remote() for worker in self.workers])  # type: ignore
         return
 
+    @ray_method
     def onload(self, target: Literal["model", "optimizer", "all"] = "all"):
         """Onload the model or optimizer of the training workers."""
         if target == "model":
@@ -280,16 +280,27 @@ class TrainingController:
             ray.get([worker.onload_optimizer.remote() for worker in self.workers])  # type: ignore
         return
 
+    @ray_method
     def update_rollout_info(self, info_dict):
         ray.get([worker.update_rollout_info.remote(**info_dict) for worker in self.workers])  # type: ignore[attr-defined]
 
+    @ray_method
     def update_weights(self):
         """Update the weights of the training workers."""
         handles = [worker.update_weights.remote() for worker in self.workers]
         ray.get(handles)
         return
 
+    @ray_method
     def save_hf(self, hf_dir: str, save_dtype: torch.dtype = torch.bfloat16):
         handles = [worker.save_hf.remote(hf_dir, save_dtype) for worker in self.workers]  # type: ignore
         ray.get(handles)
         return
+
+    @ray_method
+    def ready(self) -> bool:
+        return True
+
+
+TrainingController = ray.remote(RawTrainingController)
+TrainingControllerProxy = ActorProxy[RawTrainingController]

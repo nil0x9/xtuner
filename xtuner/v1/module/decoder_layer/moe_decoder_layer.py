@@ -12,7 +12,15 @@ from torch.nn import functional as F
 from xtuner.v1.config.generate import GenerateConfig
 from xtuner.v1.data_proto import SequenceContext
 from xtuner.v1.float8 import Float8Config
-from xtuner.v1.module import GreedyRouterConfig, MHAConfig, MLAConfig, NoAuxRouterConfig, RMSNorm, RouterResults
+from xtuner.v1.module import (
+    AttnOutputs,
+    GreedyRouterConfig,
+    MHAConfig,
+    MLAConfig,
+    NoAuxRouterConfig,
+    RMSNorm,
+    RouterResults,
+)
 from xtuner.v1.module.dispatcher import (
     CombineResult,
     DispatchResult,
@@ -25,7 +33,6 @@ from xtuner.v1.module.grouped_linear.moe_group_linear import build_grouped_linea
 from xtuner.v1.module.rope import RopeScalingConfig
 from xtuner.v1.ops.act_fn import get_act_fn
 from xtuner.v1.utils import ForwardState
-from xtuner.v1.utils.compile import maybe_compile
 
 from ..linear.linear import build_linear
 
@@ -162,7 +169,6 @@ class MoEBlock(nn.Module):
         )
         self.moe_act = moe_act_fn_cfg.build()
 
-    @maybe_compile(fullgraph=True)
     def forward(self, x, tokens_per_expert, decoding):
         gate_up_out = self.fused_w1w3(x, tokens_per_expert, decoding)
         out = self.moe_act(gate_up_out, split_dim=-1)
@@ -258,7 +264,6 @@ class MoEDecoderLayer(nn.Module):
             generate_dtype=generate_config.dtype if generate_config is not None else "bf16",
         )
 
-    @maybe_compile(fullgraph=True)
     def forward(
         self,
         *hidden_states: torch.Tensor,
@@ -524,7 +529,6 @@ class MoEDecoderLayer(nn.Module):
         router_weights = [router_results["router_weights"] for router_results in router_results_list]
         return tuple(hidden_states_out_list + router_logits + router_weights)
 
-    @maybe_compile(fullgraph=True)
     def _pre_moe_forward(
         self,
         hidden_states: torch.Tensor,
@@ -540,11 +544,12 @@ class MoEDecoderLayer(nn.Module):
 
         # Self Attention
         if state == ForwardState.TRAINING:
-            hidden_states = self.self_attn(
+            attn_outputs: AttnOutputs = self.self_attn(
                 hidden_states=hidden_states,
                 position_embeddings=position_embeddings,
                 seq_ctx=seq_ctx,
             )
+            hidden_states = attn_outputs["projected_output"]
         elif state == ForwardState.PREFILLING:
             assert past_key_values is not None, "past_key_values should be provided in pre-filling state"
             hidden_states = self.self_attn.prefilling(
@@ -574,7 +579,6 @@ class MoEDecoderLayer(nn.Module):
         router_results: RouterResults = self.gate(hidden_states, rollout_routed_experts)
         return residual, hidden_states, router_results
 
-    @maybe_compile(fullgraph=True)
     def _shared_experts_forward(
         self,
         hidden_states: torch.Tensor,
@@ -583,7 +587,6 @@ class MoEDecoderLayer(nn.Module):
         shared_experts_out = self.shared_experts(hidden_states)
         return shared_experts_out
 
-    @maybe_compile(fullgraph=True)
     def _post_moe_forward(
         self,
         combined_hidden_states: torch.Tensor,
