@@ -5,7 +5,7 @@ set -ex
 gpu_group=puyuvlm_gpu
 namespace=ailab-puyuvlm
 
-rlaunch --gpu=8 --memory=1600000 --cpu=128 \
+rlaunch --gpu=8 --memory=1800000 --cpu=128 \
     --charged-group=${gpu_group} \
     --namespace ${namespace} \
     --private-machine=yes \

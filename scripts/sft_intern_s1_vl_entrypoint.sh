@@ -3,6 +3,7 @@ export XTUNER_GC_ENABLE=1
 export XTUNER_PACK_WORKERS=8
 export XTUNER_TOKENIZE_WORKERS=16
 export XTUNER_USE_FA3=1
+export TORCH_LOGS="recompiles"
 export PYTHONPATH="$(pwd)"
 export HF_HOME="$(pwd)/"
 

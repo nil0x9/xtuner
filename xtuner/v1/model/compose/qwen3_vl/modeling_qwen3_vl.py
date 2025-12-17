@@ -105,10 +105,12 @@ class Qwen3VLForConditionalGeneration(BaseComposeModel):
         special_visual_mask = special_image_mask | special_video_mask
 
         n_visual_tokens = special_visual_mask.sum()
+        n_image_tokens = special_image_mask.sum()
+        n_video_tokens = special_video_mask.sum()
 
         if n_visual_tokens != visual_features.shape[0]:
-            raise ValueError(
-                f"Visual features and image|video tokens do not match: tokens: {n_visual_tokens}, features {visual_features.shape[0]}"
+            raise RuntimeError(
+                f"Visual features and image|video tokens do not match: tokens: {n_visual_tokens}, features {visual_features.shape[0]}, image tokens: {n_image_tokens}, video tokens: {n_video_tokens}"
             )
 
         if sequence_parallel_mesh is not None and sequence_parallel_mesh.size() > 1:

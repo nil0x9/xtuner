@@ -1423,6 +1423,7 @@ class BaseModel(nn.Module):
     def _maybe_enable_compile(self, compile_cfg: dict[str, TorchCompileOption]):
         if compile_cfg:
             torch._dynamo.config.cache_size_limit = 256
+            torch._dynamo.config.accumulated_cache_size_limit = 1024
 
         for target, option in compile_cfg.items():
             self._compile_overwrite(target, option)
