@@ -928,7 +928,7 @@ class BaseModel(nn.Module):
                         if file.is_file():
                             copy(file, target_path)
                         else:
-                            copytree(file, target_path)
+                            copytree(file, target_path, ignore_dangling_symlinks=True, dirs_exist_ok=True)
 
             # write or overwrite `model.safetensors.index.json`
             with open(hf_dir / "model.safetensors.index.json", "w") as f:
