@@ -1321,6 +1321,8 @@ class Trainer:
         if not dist.is_initialized():
             init_process_group(backend=backend)
         torch.accelerator.set_device_index(int(os.environ["LOCAL_RANK"]))
+        test_tensor = torch.ones(4, 4, device='cuda' if torch.accelerator.current_accelerator().type == "cuda" else 'npu')
+        dist.all_reduce(test_tensor)
 
     def _init_xtuner_meta(self, work_dir: Path, auto_resume: bool) -> XTunerMeta:
         if not work_dir.exists():
