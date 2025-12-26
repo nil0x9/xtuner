@@ -58,6 +58,10 @@ class InternVLVisionConfig(XTunerBaseModelConfig):
         from .modeling_vision import InternVLVisionModel
 
         return InternVLVisionModel(self)
+    
+    @property
+    def hf_config(self):
+        return None
 
 
 class InternVLProjectorConfig(XTunerBaseModelConfig):
@@ -71,6 +75,10 @@ class InternVLProjectorConfig(XTunerBaseModelConfig):
         from .modeling_projector import InternVLMultiModalProjector
 
         return InternVLMultiModalProjector(self)
+
+    @property
+    def hf_config(self):
+        return None
 
 
 class InternVLBaseConfig(BaseComposeConfig):

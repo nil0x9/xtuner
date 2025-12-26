@@ -544,7 +544,7 @@ class Trainer:
         # After init logger
         logger.warning("`resume_cfg` is deprecated, please use `auto_resume` and `load_checkpoint_cfg` instead")
 
-        self._try_bind_numa()
+        # self._try_bind_numa()
         self._set_deterministic()
         self._set_random_seed(seed)
         self._setup_env()
