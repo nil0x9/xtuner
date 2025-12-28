@@ -63,6 +63,10 @@ class InternVLVisionConfig(XTunerBaseModelConfig):
     def hf_config(self):
         return None
 
+    @property
+    def hf_config(self):
+        return None
+
 
 class InternVLProjectorConfig(XTunerBaseModelConfig):
     model_config = ConfigDict(extra="forbid")
@@ -107,12 +111,6 @@ class InternVLBaseConfig(BaseComposeConfig):
 
         return InternVLForConditionalGeneration(self)
 
-
-class InternVL3P5Dense8BConfig(InternVLBaseConfig):
-    vision_config: InternVLVisionConfig = InternVLVisionConfig()
-    projector_config: InternVLProjectorConfig = InternVLProjectorConfig()
-    text_config: Qwen3Dense8BConfig = Qwen3Dense8BConfig()
-
     @property
     def hf_config(self):
         # TODO(pppppM) Support saving HuggingFace format config
@@ -123,6 +121,12 @@ class InternVL3P5Dense8BConfig(InternVLBaseConfig):
             "HuggingFace format checkpoint to not match the weights."
         )
         return None
+
+
+class InternVL3P5Dense8BConfig(InternVLBaseConfig):
+    vision_config: InternVLVisionConfig = InternVLVisionConfig()
+    projector_config: InternVLProjectorConfig = InternVLProjectorConfig()
+    text_config: Qwen3Dense8BConfig = Qwen3Dense8BConfig()
 
 
 class InternVL3P5MoE30BA3Config(InternVLBaseConfig):
@@ -130,30 +134,8 @@ class InternVL3P5MoE30BA3Config(InternVLBaseConfig):
     projector_config: InternVLProjectorConfig = InternVLProjectorConfig(text_hidden_size=2048)
     text_config: Qwen3MoE30BA3Config = Qwen3MoE30BA3Config()
 
-    @property
-    def hf_config(self):
-        # TODO(pppppM) Support saving HuggingFace format config
-        logger.warning(
-            f"{type(self)} does not support conversion to HuggingFace config format. "
-            "Only the original HuggingFace config will be retained in the saved HuggingFace format checkpoint. "
-            f"If you have changed the default values in {type(self)}, it may cause the config in the saved "
-            "HuggingFace format checkpoint to not match the weights."
-        )
-        return None
-
 
 class InternVL3P5Dense1BConfig(InternVLBaseConfig):
     vision_config: InternVLVisionConfig = InternVLVisionConfig()
     projector_config: InternVLProjectorConfig = InternVLProjectorConfig(text_hidden_size=1024)
     text_config: Qwen3Dense0P6BConfig = Qwen3Dense0P6BConfig()
-
-    @property
-    def hf_config(self):
-        # TODO(pppppM) Support saving HuggingFace format config
-        logger.warning(
-            f"{type(self)} does not support conversion to HuggingFace config format. "
-            "Only the original HuggingFace config will be retained in the saved HuggingFace format checkpoint. "
-            f"If you have changed the default values in {type(self)}, it may cause the config in the saved "
-            "HuggingFace format checkpoint to not match the weights."
-        )
-        return None
