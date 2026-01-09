@@ -87,7 +87,10 @@ class TestMLLMTokenizeFn(TestCase):
         input_ids = tokenize_fn(messages)['input_ids']
         self.assertEqual(input_ids, input_ids_ref)
 
-    def test_qwen3_vl_sft_single_image(self):
+    @parametrize.parametrize("add_vision_id", [(True,), (False,)])
+    def test_qwen3_vl_sft_single_image(self, add_vision_id):
+        tokenize_fn = Qwen3VLTokenizeFnConfig(processor_path=QWEN3_VL_PATH,
+                                              add_vision_id=add_vision_id).build(self.tokenizer)
         data_path = 'tests/resource/mllm_sft_single_image_example_data.jsonl'
         total_step = 5
         with open(data_path) as f:
