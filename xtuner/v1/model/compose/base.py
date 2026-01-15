@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 import torch
+from torch import nn
 import torch.distributed as dist
 from pydantic import ConfigDict
 from torch.distributed.device_mesh import init_device_mesh
@@ -39,6 +40,10 @@ class BaseComposeConfig(XTunerBaseModelConfig):
     freeze_vision: bool = False
     freeze_projector: bool = False
     freeze_language: bool = False
+
+    freeze_vision_exception_layers: list[int] | None = None
+    freeze_language_exception_layers: list[int] | None = None
+
     dcp_ignore_frozen_params: bool = True
 
 
@@ -72,20 +77,64 @@ class BaseComposeModel(BaseModel):
 
     def _freeze_modules(self):
         freeze_vision = self.config.freeze_vision
+
         if freeze_vision:
             self.vision_tower.requires_grad_(False)
             self.vision_tower.eval()
             logger.info("Freeze vision tower")
-        freeze_projector = self.config.freeze_projector
+
+            freeze_vision_exception_layers = self.config.freeze_vision_exception_layers or []  # type: ignore[attr-defined]
+
+            # vision tower uses ModuleList
+            vision_layers: nn.ModuleList  # TODO: refactor this if possible @nil0x9
+            if hasattr(self.vision_tower, "encoder") and hasattr(self.vision_tower.encoder, "layer"):
+                vision_layers = self.vision_tower.encoder.layer
+            elif hasattr(self.vision_tower, "blocks"):
+                vision_layers = self.vision_tower.blocks
+            else:
+                raise ValueError("Cannot find vision layers to unfreeze.")
+
+            for layer_idx in freeze_vision_exception_layers:
+                if layer_idx < 0 or layer_idx >= len(vision_layers):
+                    raise ValueError(
+                        f"Invalid layer idx {layer_idx} for vision tower"
+                        f"with {len(vision_layers)} layers."
+                    )
+
+                vision_layers[layer_idx].requires_grad_(True)
+                vision_layers[layer_idx].train()
+
+                logger.info(f"Unfreeze vision tower layer {layer_idx}")
+
+        freeze_projector = self.config.freeze_projector  # type: ignore[attr-defined]
+
         if freeze_projector:
             self.multi_modal_projector.requires_grad_(False)
             self.multi_modal_projector.eval()
             logger.info("Freeze multi modal projector")
-        freeze_language = self.config.freeze_language
+
+        freeze_language = self.config.freeze_language  # type: ignore[attr-defined]
+
         if freeze_language:
             self.language_model.requires_grad_(False)
             self.language_model.eval()
             logger.info("Freeze language model")
+
+            freeze_language_exception_layers = self.config.freeze_language_exception_layers or []  # type: ignore[attr-defined]
+
+            for layer_idx in freeze_language_exception_layers:
+                if layer_idx < 0 or layer_idx >= len(self.language_model.layers):
+                    raise ValueError(
+                        f"Invalid layer idx {layer_idx} for language model "
+                        f"with {len(self.language_model.layers)} layers."
+                    )
+                # language models uses ModuleDict
+                self.language_model.layers[str(layer_idx)].requires_grad_(True)
+                self.language_model.layers[str(layer_idx)].train()
+
+                logger.info(f"Unfreeze language model layer {layer_idx}")
+
+
 
     @override
     def init_weights(self) -> None:
