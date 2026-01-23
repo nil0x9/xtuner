@@ -42,6 +42,8 @@ RouterWeights: TypeAlias = torch.Tensor
 HiddenStates: TypeAlias = torch.Tensor
 
 
+_GC_DONE = None
+
 class MoEActFnProtocol(Protocol):
     def __call__(self, fused_x: torch.Tensor, split_dim: int = -1) -> torch.Tensor: ...
 
@@ -288,7 +290,7 @@ class MoEDecoderLayer(nn.Module):
             assert isinstance(position_embeddings, tuple) and len(position_embeddings) == 2, (
                 "position_embeddings should be a tuple of two tensors (position_ids, position_embeds)"
             )
-            return self._forward(
+            outputs =  self._forward(
                 hidden_states=hidden_states[0],
                 seq_ctx=seq_ctx,
                 position_embeddings=position_embeddings,
@@ -301,11 +303,20 @@ class MoEDecoderLayer(nn.Module):
                 "position_embeddings should be a list of tuples with the same length as hidden_states"
             )
 
-            return self._micro_batch_forward(
+            outputs =  self._micro_batch_forward(
                 hidden_states_list=list(hidden_states),
                 seq_ctx_list=seq_ctx,
                 position_embeddings_list=position_embeddings,
             )
+
+        global _GC_DONE
+        if _GC_DONE is None:
+            import gc
+            gc.collect()
+            _GC_DONE = True
+
+        return outputs
+
 
     def _forward(
         self,

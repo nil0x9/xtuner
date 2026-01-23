@@ -802,6 +802,13 @@ class MoE(BaseModel):
         experts_fsdp_size = world_size // self.fsdp_config.ep_size
 
         if self.fsdp_config.hsdp_sharding_size is None:
+            # hccl buffsize for npu
+            import torch_npu
+            from torch.distributed.device_mesh import _mesh_resources
+            options0 = torch_npu._C._distributed_c10d.ProcessGroupHCCL.Options()
+            options0.hccl_config = {"hccl_buffer_size": 512}
+            _mesh_resources._set_mesh_dim_group_options(0, "hccl", pg_options=options0)
+
             model_mesh = init_device_mesh(
                 device,
                 (experts_fsdp_size, self.fsdp_config.ep_size),
