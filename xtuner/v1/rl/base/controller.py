@@ -1,6 +1,7 @@
 import math
 import os
-from typing import Literal, TypedDict
+from typing import Literal
+from typing_extensions import TypedDict
 
 import ray
 import torch

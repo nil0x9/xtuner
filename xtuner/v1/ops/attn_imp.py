@@ -1,6 +1,6 @@
 import traceback
 from functools import lru_cache
-from typing import TypedDict
+from typing_extensions import TypedDict
 
 import torch
 import torch.nn as nn
