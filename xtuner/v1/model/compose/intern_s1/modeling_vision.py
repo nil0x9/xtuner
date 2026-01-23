@@ -1,3 +1,4 @@
+import os
 from functools import partial
 from torch import nn
 import torch
@@ -36,6 +37,7 @@ from xtuner.v1.ops.others import Dropout
 from xtuner.v1.ops.act_fn import get_act_fn
 from xtuner.v1.utils import get_logger
 from xtuner.v1.module import AttnOutputs
+from xtuner.v1.utils.activation_offload import async_save_on_cpu
 
 DEVICE = get_device()
 DEVICE_MODULE = get_torch_device_module()
@@ -231,6 +233,8 @@ class InternS1VisionEncoder(nn.Module):
         self.layer = nn.ModuleList([
             InternS1VisionLayer(config, dpr[idx]) for idx in range(config.num_hidden_layers)])
 
+        self.offload_stream = torch.cuda.Stream()
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -242,7 +246,16 @@ class InternS1VisionEncoder(nn.Module):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)  # type: ignore
 
-            hidden_states = layer_module(hidden_states)
+            # hidden_states = layer_module(hidden_states)
+            if int(os.getenv("XTUNER_ACTIVATION_OFFLOAD", "0")) == 1:
+                with async_save_on_cpu(
+                    h2d_stream=self.offload_stream,
+                    d2h_stream=self.offload_stream,
+                    block_idx=int(i),
+                    depth=len(self.layer) + self.config.text_hidden_layers,
+                    custom_check_fn=lambda x: x.data_ptr() == hidden_states.data_ptr(),
+                ):
+                    hidden_states = layer_module(hidden_states)
 
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)  # type: ignore
