@@ -6,6 +6,10 @@ from torch.distributed.device_mesh import DeviceMesh
 from typing_extensions import Self
 
 from .utils import pad_to_multiple_of, split_for_sequence_parallel
+from xtuner.v1.utils.device import get_device
+
+
+DEVICE = get_device()
 
 
 # Avoid using dataclass decorator here to get rid of extra ops called in pytorch 2.8 and above
@@ -273,7 +277,7 @@ class SequenceContext:
             mask = cast(torch.BoolTensor, torch.ones_like(self.input_ids, dtype=torch.bool))
         else:
             assert self.inputs_embeds is not None, "input_ids or inputs_embeds must be provided"
-            mask = cast(torch.BoolTensor, torch.ones_like(self.inputs_embeds[..., 0], dtype=torch.bool))
+            mask = cast(torch.BoolTensor, torch.ones(*self.inputs_embeds.shape[:-1], dtype=torch.bool, device=DEVICE))
         if self.num_padding > 0:
             mask[..., -self.num_padding :] = False
         return mask

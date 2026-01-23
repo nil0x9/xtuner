@@ -10,9 +10,13 @@ from torch.distributed.device_mesh import DeviceMesh
 from typing_extensions import Self
 
 from xtuner.v1.loss import BaseLossConfig, BaseLossContext, BaseLossKwargs
+from xtuner.v1.utils.device import get_device
 
 # from xtuner.v1.profiler.prober import ProberList
 from .utils import sp_gather, sp_split
+
+
+DEVICE = get_device()
 
 
 class CELossConfig(BaseLossConfig):
@@ -108,10 +112,10 @@ class CELossContext(BaseLossContext[CELossContextInputItem]):
         loss_weight_list: list[torch.Tensor] = []
         for i, shifted_labels in enumerate(shifted_labels_list):
             if loss_cfg.loss_reduction == "token":
-                loss_weight = torch.ones_like(shifted_labels, dtype=torch.float32)
+                loss_weight = torch.ones_like(shifted_labels, dtype=torch.float32, device=DEVICE)
             else:
                 assert cu_seq_lens_list is not None, "cu_seq_lens_list must be provided for sample or square reduction"
-                cu_seq_lens = cu_seq_lens_list[i]
+                cu_seq_lens = cu_seq_lens_list[i].to(shifted_labels.device)
                 boundaries = cu_seq_lens[1:]
                 num_tokens = cu_seq_lens[1:] - cu_seq_lens[:-1]
 
