@@ -806,7 +806,7 @@ class Trainer:
 
             time_before_get_data = time.time()
 
-            if self.cur_step % 50 == 0:
+            if self.cur_step == 1 or self.cur_step % 50 == 0:
                 gc.collect()
 
         # TODO: Should use flush rather than close
