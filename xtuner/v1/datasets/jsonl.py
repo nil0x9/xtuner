@@ -543,7 +543,7 @@ class JsonlDataset(torch.utils.data.Dataset[T | CacheItem]):
                 if "gloo" in (backend := dist.get_backend()):
                     group = dist.new_group(backend=backend, timeout=datetime.timedelta(seconds=1800))
                 else:
-                    group = dist.new_group(timeout=datetime.timedelta(seconds=1800))
+                    group = dist.new_group(timeout=datetime.timedelta(seconds=3600))
                 cls._process_group = group
         return cast(dist.ProcessGroup, cls._process_group)
 
